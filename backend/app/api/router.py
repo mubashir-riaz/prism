@@ -1,12 +1,12 @@
 from fastapi import APIRouter
 
+from app.api.v1.health import router as health_router
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
 
 api_router = APIRouter()
 
-# Root-level health router (for health checks at root level, e.g. /health)
-health_router = APIRouter(tags=["Health"])
+# Root-level health router (for health checks at root level: /health, /health/ready)
 api_router.include_router(health_router)
 
 # Mount versioned API router under configured prefix (e.g. /v1)
