@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-prism}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -40,33 +40,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     env_file:
-      - ./backend/.env.example
+      - .env
+      - ./backend/.env
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
     environment:
-      - ENVIRONMENT=development
-
-  celery_worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: prism-celery-worker
-    command: celery -A app.core.celery_app worker --loglevel=info
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - ./backend/.env.example
-    volumes:
-      - ./backend:/app
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-prism}
 
 volumes:
   postgres_data:
