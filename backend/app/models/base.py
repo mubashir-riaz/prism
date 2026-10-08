@@ -10,14 +10,16 @@ from sqlalchemy.types import Uuid
 from app.db.base import Base
 
 
-class TimestampedBase:
-    """Mixin class providing UUID primary key and timezone-aware timestamps.
+class TimestampedBase(Base):
+    """Abstract declarative base class providing UUID primary key and timezone-aware timestamps.
 
     Attributes:
         id: UUID primary key, defaulting to uuid4.
         created_at: Creation timestamp with timezone, server default func.now().
         updated_at: Last update timestamp with timezone, server default and onupdate func.now().
     """
+
+    __abstract__ = True
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -37,7 +39,4 @@ class TimestampedBase:
     )
 
 
-class BaseModel(Base, TimestampedBase):
-    """Abstract declarative base class combining Base and TimestampedBase."""
-
-    __abstract__ = True
+BaseModel = TimestampedBase
