@@ -2,6 +2,8 @@
 
 from app.models.base import BaseModel, TimestampedBase
 from app.models.enums import AuditAction, EnvironmentName, UserRole
+from app.models.organization import Organization
+from app.models.user import User
 
 __all__ = [
     "BaseModel",
@@ -9,4 +11,6 @@ __all__ = [
     "UserRole",
     "EnvironmentName",
     "AuditAction",
+    "Organization",
+    "User",
 ]
