@@ -1,5 +1,6 @@
 """Database models package."""
 
+from app.models.api_key import APIKey
 from app.models.base import BaseModel, TimestampedBase
 from app.models.enums import AuditAction, EnvironmentName, UserRole
 from app.models.environment import Environment
@@ -17,4 +18,5 @@ __all__ = [
     "User",
     "Project",
     "Environment",
+    "APIKey",
 ]
