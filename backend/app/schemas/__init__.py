@@ -1,5 +1,11 @@
 """Pydantic schemas package."""
 
+from app.schemas.api_key import (
+    APIKeyCreate,
+    APIKeyCreateResponse,
+    APIKeyRead,
+    APIKeyUpdate,
+)
 from app.schemas.environment import (
     EnvironmentCreate,
     EnvironmentRead,
@@ -34,4 +40,8 @@ __all__ = [
     "EnvironmentCreate",
     "EnvironmentRead",
     "EnvironmentUpdate",
+    "APIKeyCreate",
+    "APIKeyRead",
+    "APIKeyUpdate",
+    "APIKeyCreateResponse",
 ]
