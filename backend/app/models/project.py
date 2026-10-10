@@ -10,6 +10,7 @@ from sqlalchemy.types import Uuid
 from app.models.base import TimestampedBase
 
 if TYPE_CHECKING:
+    from app.models.api_key import APIKey
     from app.models.environment import Environment
     from app.models.organization import Organization
 
@@ -54,6 +55,11 @@ class Project(TimestampedBase):
     )
     environments: Mapped[list["Environment"]] = relationship(
         "Environment",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+    api_keys: Mapped[list["APIKey"]] = relationship(
+        "APIKey",
         back_populates="project",
         cascade="all, delete-orphan",
     )
