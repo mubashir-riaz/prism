@@ -1,5 +1,6 @@
 """Database repositories package."""
 
+from app.repositories.api_key_repository import APIKeyRepository
 from app.repositories.base import BaseRepository
 from app.repositories.environment_repository import EnvironmentRepository
 from app.repositories.organization_repository import OrganizationRepository
@@ -12,4 +13,5 @@ __all__ = [
     "UserRepository",
     "ProjectRepository",
     "EnvironmentRepository",
+    "APIKeyRepository",
 ]
