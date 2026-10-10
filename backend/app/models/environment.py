@@ -11,6 +11,7 @@ from app.models.base import TimestampedBase
 from app.models.enums import EnvironmentName
 
 if TYPE_CHECKING:
+    from app.models.api_key import APIKey
     from app.models.project import Project
 
 
@@ -43,6 +44,11 @@ class Environment(TimestampedBase):
     project: Mapped["Project"] = relationship(
         "Project",
         back_populates="environments",
+    )
+    api_keys: Mapped[list["APIKey"]] = relationship(
+        "APIKey",
+        back_populates="environment",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
