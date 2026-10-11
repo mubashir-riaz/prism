@@ -6,6 +6,10 @@ from app.schemas.api_key import (
     APIKeyRead,
     APIKeyUpdate,
 )
+from app.schemas.audit_log import (
+    AuditLogCreate,
+    AuditLogRead,
+)
 from app.schemas.environment import (
     EnvironmentCreate,
     EnvironmentRead,
@@ -44,4 +48,7 @@ __all__ = [
     "APIKeyRead",
     "APIKeyUpdate",
     "APIKeyCreateResponse",
+    "AuditLogCreate",
+    "AuditLogRead",
 ]
+
