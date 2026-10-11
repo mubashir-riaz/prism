@@ -12,6 +12,7 @@ from app.models.base import TimestampedBase
 from app.models.enums import UserRole
 
 if TYPE_CHECKING:
+    from app.models.audit_log import AuditLog
     from app.models.organization import Organization
 
 
@@ -61,6 +62,10 @@ class User(TimestampedBase):
     organization: Mapped["Organization"] = relationship(
         "Organization",
         back_populates="users",
+    )
+    audit_logs: Mapped[list["AuditLog"]] = relationship(
+        "AuditLog",
+        back_populates="actor_user",
     )
 
     def __repr__(self) -> str:
