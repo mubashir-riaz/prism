@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import TimestampedBase
 
 if TYPE_CHECKING:
+    from app.models.audit_log import AuditLog
     from app.models.project import Project
     from app.models.user import User
 
@@ -41,6 +42,11 @@ class Organization(TimestampedBase):
     )
     projects: Mapped[list["Project"]] = relationship(
         "Project",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+    )
+    audit_logs: Mapped[list["AuditLog"]] = relationship(
+        "AuditLog",
         back_populates="organization",
         cascade="all, delete-orphan",
     )
