@@ -1,6 +1,7 @@
 """Business logic services package."""
 
 from app.services.api_key_service import APIKeyService
+from app.services.audit_service import AuditService
 from app.services.environment_service import EnvironmentService
 from app.services.organization_service import OrganizationService
 from app.services.project_service import ProjectService
@@ -12,4 +13,6 @@ __all__ = [
     "ProjectService",
     "EnvironmentService",
     "APIKeyService",
+    "AuditService",
 ]
+
