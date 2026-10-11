@@ -1,9 +1,10 @@
 """AuditLog Pydantic schemas."""
 
+from datetime import datetime
 from typing import Any, Optional
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import AuditAction
 
@@ -24,3 +25,15 @@ class AuditLogCreate(AuditLogBase):
 
     organization_id: uuid.UUID = Field(..., description="Organization ID where the action occurred")
     actor_user_id: Optional[uuid.UUID] = Field(None, description="User ID performing the action, or None for system actions")
+
+
+class AuditLogRead(AuditLogBase):
+    """Schema for reading audit log entries."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    actor_user_id: Optional[uuid.UUID]
+    created_at: datetime
+    updated_at: datetime
