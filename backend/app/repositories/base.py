@@ -1,12 +1,13 @@
-"""Generic base repository for asynchronous SQLAlchemy 2.x operations."""
-
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any, Generic, Optional, Sequence, Type, TypeVar
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import Base
-from app.exceptions import NotFoundError
+from app.exceptions import ConflictError, NotFoundError, PrismException
 
 T = TypeVar("T", bound=Base)
 
@@ -115,3 +116,19 @@ class BaseRepository(Generic[T]):
     async def rollback(self) -> None:
         """Rollback the current database transaction."""
         await self.session.rollback()
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncGenerator[None, None]:
+        """Unit-of-work context manager: commit on success, rollback on exception."""
+        try:
+            yield
+            await self.commit()
+        except PrismException:
+            await self.rollback()
+            raise
+        except IntegrityError as exc:
+            await self.rollback()
+            raise ConflictError(f"Database integrity constraint violated: {exc.orig}") from exc
+        except Exception:
+            await self.rollback()
+            raise
