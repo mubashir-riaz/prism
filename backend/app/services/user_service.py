@@ -13,13 +13,17 @@ from app.schemas.user import UserCreate, UserUpdate
 
 
 class UserService:
-    """Service encapsulating user management and business operations."""
+    """Service encapsulating user management and business operations.
+    
+    Adheres to unit-of-work semantics: commits at the end of a successful operation,
+    and rolls back on exception.
+    """
 
-    def __init__(self, session_or_repo: Union[AsyncSession, UserRepository]) -> None:
-        if isinstance(session_or_repo, UserRepository):
-            self.repo = session_or_repo
+    def __init__(self, session: Union[AsyncSession, UserRepository]) -> None:
+        if isinstance(session, UserRepository):
+            self.repo = session
         else:
-            self.repo = UserRepository(session_or_repo)
+            self.repo = UserRepository(session)
 
     async def create_user(
         self,
@@ -32,17 +36,18 @@ class UserService:
 
         Note: Password handling and hashing will be wired in Phase 3.
         """
-        existing = await self.repo.get_by_email(email)
-        if existing:
-            raise ConflictError(f"User with email '{email}' already exists.")
+        async with self.repo.transaction():
+            existing = await self.repo.get_by_email(email)
+            if existing:
+                raise ConflictError(f"User with email '{email}' already exists.")
 
-        return await self.repo.create(
-            organization_id=org_id,
-            email=email,
-            role=role,
-            full_name=full_name,
-            hashed_password="",
-        )
+            return await self.repo.create(
+                organization_id=org_id,
+                email=email,
+                role=role,
+                full_name=full_name,
+                hashed_password="",
+            )
 
     async def create_from_schema(self, data: UserCreate) -> User:
         """Helper to create a user directly from a UserCreate schema."""
@@ -75,11 +80,19 @@ class UserService:
 
     async def deactivate_user(self, id: Union[uuid.UUID, str]) -> User:
         """Deactivate a user account by setting is_active to False."""
-        user = await self.get_user(id)
-        return await self.repo.update(user, is_active=False)
+        async with self.repo.transaction():
+            user = await self.get_user(id)
+            return await self.repo.update(user, is_active=False)
 
     async def update_user(self, id: Union[uuid.UUID, str], data: UserUpdate) -> User:
         """Update user profile or role details."""
-        user = await self.get_user(id)
-        update_data = data.model_dump(exclude_unset=True)
-        return await self.repo.update(user, **update_data)
+        async with self.repo.transaction():
+            user = await self.get_user(id)
+            update_data = data.model_dump(exclude_unset=True)
+
+            if "email" in update_data and update_data["email"] != user.email:
+                existing = await self.repo.get_by_email(update_data["email"])
+                if existing and str(existing.id) != str(user.id):
+                    raise ConflictError(f"User with email '{update_data['email']}' already exists.")
+
+            return await self.repo.update(user, **update_data)
