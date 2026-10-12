@@ -14,13 +14,15 @@ class AuditService:
     """Write-only service encapsulating audit log append operations.
     
     Audit logs are strictly append-only; update and delete operations are prohibited.
+    Adheres to unit-of-work semantics: commits at the end of a successful operation,
+    and rolls back on exception.
     """
 
-    def __init__(self, session_or_repo: Union[AsyncSession, AuditLogRepository]) -> None:
-        if isinstance(session_or_repo, AuditLogRepository):
-            self.repo = session_or_repo
+    def __init__(self, session: Union[AsyncSession, AuditLogRepository]) -> None:
+        if isinstance(session, AuditLogRepository):
+            self.repo = session
         else:
-            self.repo = AuditLogRepository(session_or_repo)
+            self.repo = AuditLogRepository(session)
 
     async def record(
         self,
@@ -48,18 +50,19 @@ class AuditService:
         Returns:
             The newly created and persisted AuditLog record.
         """
-        parsed_org_id = uuid.UUID(str(org_id)) if isinstance(org_id, str) else org_id
-        parsed_actor_id = uuid.UUID(str(actor_id)) if isinstance(actor_id, str) and actor_id else actor_id
-        parsed_resource_id = uuid.UUID(str(resource_id)) if isinstance(resource_id, str) and resource_id else resource_id
-        parsed_action = AuditAction(action) if isinstance(action, str) else action
+        async with self.repo.transaction():
+            parsed_org_id = uuid.UUID(str(org_id)) if isinstance(org_id, str) else org_id
+            parsed_actor_id = uuid.UUID(str(actor_id)) if isinstance(actor_id, str) and actor_id else actor_id
+            parsed_resource_id = uuid.UUID(str(resource_id)) if isinstance(resource_id, str) and resource_id else resource_id
+            parsed_action = AuditAction(action) if isinstance(action, str) else action
 
-        return await self.repo.create(
-            organization_id=parsed_org_id,
-            actor_user_id=parsed_actor_id,
-            action=parsed_action,
-            resource_type=resource_type,
-            resource_id=parsed_resource_id,
-            metadata_json=metadata or {},
-            ip_address=ip,
-            user_agent=ua,
-        )
+            return await self.repo.create(
+                organization_id=parsed_org_id,
+                actor_user_id=parsed_actor_id,
+                action=parsed_action,
+                resource_type=resource_type,
+                resource_id=parsed_resource_id,
+                metadata_json=metadata or {},
+                ip_address=ip,
+                user_agent=ua,
+            )
