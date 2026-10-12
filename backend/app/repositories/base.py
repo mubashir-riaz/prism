@@ -111,3 +111,7 @@ class BaseRepository(Generic[T]):
     async def commit(self) -> None:
         """Commit the current database transaction."""
         await self.session.commit()
+
+    async def rollback(self) -> None:
+        """Rollback the current database transaction."""
+        await self.session.rollback()
