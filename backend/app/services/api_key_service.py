@@ -14,13 +14,17 @@ from app.repositories.api_key_repository import APIKeyRepository
 
 
 class APIKeyService:
-    """Service encapsulating API key creation, revocation, and metadata listing."""
+    """Service encapsulating API key creation, revocation, and metadata listing.
+    
+    Adheres to unit-of-work semantics: commits at the end of a successful operation,
+    and rolls back on exception.
+    """
 
-    def __init__(self, session_or_repo: Union[AsyncSession, APIKeyRepository]) -> None:
-        if isinstance(session_or_repo, APIKeyRepository):
-            self.repo = session_or_repo
+    def __init__(self, session: Union[AsyncSession, APIKeyRepository]) -> None:
+        if isinstance(session, APIKeyRepository):
+            self.repo = session
         else:
-            self.repo = APIKeyRepository(session_or_repo)
+            self.repo = APIKeyRepository(session)
 
     async def create_api_key(
         self,
@@ -33,21 +37,22 @@ class APIKeyService:
         The plaintext key is generated using secrets.token_urlsafe(32) and returned
         only once. Only the prefix and SHA256 hashed secret are stored in the database.
         """
-        raw_secret = secrets.token_urlsafe(32)
-        key_prefix = f"prism_{raw_secret[:8]}"
-        plaintext_key = f"{key_prefix}_{raw_secret[8:]}"
-        hashed_key = hashlib.sha256(plaintext_key.encode("utf-8")).hexdigest()
+        async with self.repo.transaction():
+            raw_secret = secrets.token_urlsafe(32)
+            key_prefix = f"prism_{raw_secret[:8]}"
+            plaintext_key = f"{key_prefix}_{raw_secret[8:]}"
+            hashed_key = hashlib.sha256(plaintext_key.encode("utf-8")).hexdigest()
 
-        record = await self.repo.create(
-            project_id=project_id,
-            environment_id=environment_id,
-            name=name,
-            key_prefix=key_prefix,
-            hashed_key=hashed_key,
-            is_active=True,
-        )
+            record = await self.repo.create(
+                project_id=project_id,
+                environment_id=environment_id,
+                name=name,
+                key_prefix=key_prefix,
+                hashed_key=hashed_key,
+                is_active=True,
+            )
 
-        return record, plaintext_key
+            return record, plaintext_key
 
     async def get_api_key(self, id: Union[uuid.UUID, str]) -> APIKey:
         """Retrieve an API key by its ID, raising NotFoundError if missing."""
@@ -55,9 +60,10 @@ class APIKeyService:
 
     async def revoke_api_key(self, id: Union[uuid.UUID, str]) -> APIKey:
         """Revoke an API key by setting is_active to False and revoked_at to current timestamp."""
-        key = await self.get_api_key(id)
-        now = datetime.now(timezone.utc)
-        return await self.repo.update(key, is_active=False, revoked_at=now)
+        async with self.repo.transaction():
+            key = await self.get_api_key(id)
+            now = datetime.now(timezone.utc)
+            return await self.repo.update(key, is_active=False, revoked_at=now)
 
     async def list_keys_for_project(
         self,
@@ -91,5 +97,6 @@ class APIKeyService:
 
     async def record_usage(self, id: Union[uuid.UUID, str]) -> APIKey:
         """Record the last used timestamp for an API key."""
-        key = await self.get_api_key(id)
-        return await self.repo.update(key, last_used_at=datetime.now(timezone.utc))
+        async with self.repo.transaction():
+            key = await self.get_api_key(id)
+            return await self.repo.update(key, last_used_at=datetime.now(timezone.utc))
