@@ -14,19 +14,23 @@ from app.schemas.project import ProjectCreate, ProjectUpdate
 
 
 class ProjectService:
-    """Service encapsulating business operations and validation for projects."""
+    """Service encapsulating business operations and validation for projects.
+    
+    Adheres to unit-of-work semantics: commits at the end of a successful operation,
+    and rolls back on exception.
+    """
 
     def __init__(
         self,
-        session_or_repo: Union[AsyncSession, ProjectRepository],
+        session: Union[AsyncSession, ProjectRepository],
         env_repo: Optional[EnvironmentRepository] = None,
     ) -> None:
-        if isinstance(session_or_repo, ProjectRepository):
-            self.project_repo = session_or_repo
-            self.env_repo = env_repo or EnvironmentRepository(self.project_repo.session)
+        if isinstance(session, ProjectRepository):
+            self.project_repo = session
+            self.env_repo = env_repo or EnvironmentRepository(session.session)
         else:
-            self.project_repo = ProjectRepository(session_or_repo)
-            self.env_repo = env_repo or EnvironmentRepository(session_or_repo)
+            self.project_repo = ProjectRepository(session)
+            self.env_repo = env_repo or EnvironmentRepository(session)
 
     async def create_project(self, data: ProjectCreate) -> Project:
         """Create a new project and auto-create default environments (dev, staging, prod).
@@ -35,30 +39,30 @@ class ProjectService:
             When creating a project, auto-creates the three default environments
             (dev, staging, prod), with dev marked as the default environment.
         """
-        existing = await self.project_repo.get_by_slug(data.organization_id, data.slug)
-        if existing:
-            raise ConflictError(
-                f"Project with slug '{data.slug}' already exists in this organization."
+        async with self.project_repo.transaction():
+            existing = await self.project_repo.get_by_slug(data.organization_id, data.slug)
+            if existing:
+                raise ConflictError(
+                    f"Project with slug '{data.slug}' already exists in this organization."
+                )
+
+            project = await self.project_repo.create(
+                organization_id=data.organization_id,
+                name=data.name,
+                slug=data.slug,
+                description=data.description,
+                is_archived=False,
             )
 
-        project = await self.project_repo.create(
-            organization_id=data.organization_id,
-            name=data.name,
-            slug=data.slug,
-            description=data.description,
-            is_archived=False,
-        )
+            # Auto-create the three default environments, with dev as default
+            for env_name in (EnvironmentName.DEV, EnvironmentName.STAGING, EnvironmentName.PROD):
+                await self.env_repo.create(
+                    project_id=project.id,
+                    name=env_name,
+                    is_default=(env_name == EnvironmentName.DEV),
+                )
 
-        # Auto-create the three default environments, with dev as default
-        for env_name in (EnvironmentName.DEV, EnvironmentName.STAGING, EnvironmentName.PROD):
-            await self.env_repo.create(
-                project_id=project.id,
-                name=env_name,
-                is_default=(env_name == EnvironmentName.DEV),
-            )
-
-        # Return project with newly created environments loaded
-        return await self.project_repo.get_with_environments(project.id) or project
+            return await self.project_repo.get_with_environments(project.id) or project
 
     async def get_project(self, id: Union[uuid.UUID, str]) -> Project:
         """Retrieve a project by its ID, raising NotFoundError if missing."""
@@ -95,21 +99,23 @@ class ProjectService:
         self, id: Union[uuid.UUID, str], data: ProjectUpdate
     ) -> Project:
         """Update project details, verifying slug uniqueness if slug is changed."""
-        project = await self.get_project(id)
-        update_data = data.model_dump(exclude_unset=True)
+        async with self.project_repo.transaction():
+            project = await self.get_project(id)
+            update_data = data.model_dump(exclude_unset=True)
 
-        if "slug" in update_data and update_data["slug"] != project.slug:
-            existing = await self.project_repo.get_by_slug(
-                project.organization_id, update_data["slug"]
-            )
-            if existing and existing.id != project.id:
-                raise ConflictError(
-                    f"Project with slug '{update_data['slug']}' already exists in this organization."
+            if "slug" in update_data and update_data["slug"] != project.slug:
+                existing = await self.project_repo.get_by_slug(
+                    project.organization_id, update_data["slug"]
                 )
+                if existing and str(existing.id) != str(project.id):
+                    raise ConflictError(
+                        f"Project with slug '{update_data['slug']}' already exists in this organization."
+                    )
 
-        return await self.project_repo.update(project, **update_data)
+            return await self.project_repo.update(project, **update_data)
 
     async def archive_project(self, id: Union[uuid.UUID, str]) -> Project:
         """Archive a project by setting is_archived to True."""
-        project = await self.get_project(id)
-        return await self.project_repo.update(project, is_archived=True)
+        async with self.project_repo.transaction():
+            project = await self.get_project(id)
+            return await self.project_repo.update(project, is_archived=True)
