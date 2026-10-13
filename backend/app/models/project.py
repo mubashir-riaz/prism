@@ -25,7 +25,7 @@ class Project(TimestampedBase):
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
         index=True,
         nullable=False,
     )
