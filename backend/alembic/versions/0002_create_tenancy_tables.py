@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "0002_create_tenancy_tables"
@@ -197,8 +198,202 @@ def upgrade() -> None:
         unique=False,
     )
 
+    # 5. api_keys table
+    op.create_table(
+        "api_keys",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column("project_id", sa.Uuid(), nullable=False),
+        sa.Column("environment_id", sa.Uuid(), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("key_prefix", sa.String(length=32), nullable=False),
+        sa.Column("hashed_key", sa.String(length=255), nullable=False),
+        sa.Column(
+            "is_active",
+            sa.Boolean(),
+            server_default=sa.text("true"),
+            nullable=False,
+        ),
+        sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["environment_id"],
+            ["environments.id"],
+            name=op.f("fk_api_keys_environment_id_environments"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["project_id"],
+            ["projects.id"],
+            name=op.f("fk_api_keys_project_id_projects"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_api_keys")),
+    )
+    op.create_index(
+        op.f("ix_api_keys_environment_id"),
+        "api_keys",
+        ["environment_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_api_keys_key_prefix"),
+        "api_keys",
+        ["key_prefix"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_api_keys_project_id"),
+        "api_keys",
+        ["project_id"],
+        unique=False,
+    )
+
+    # 6. audit_logs table
+    op.create_table(
+        "audit_logs",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column("organization_id", sa.Uuid(), nullable=False),
+        sa.Column("actor_user_id", sa.Uuid(), nullable=True),
+        sa.Column("action", sa.String(length=50), nullable=False),
+        sa.Column("resource_type", sa.String(length=255), nullable=False),
+        sa.Column("resource_id", sa.Uuid(), nullable=True),
+        sa.Column(
+            "metadata_json",
+            postgresql.JSONB(astext_type=sa.Text()),
+            server_default=sa.text("'{}'"),
+            nullable=False,
+        ),
+        sa.Column("ip_address", sa.String(length=255), nullable=True),
+        sa.Column("user_agent", sa.String(length=1024), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["actor_user_id"],
+            ["users.id"],
+            name=op.f("fk_audit_logs_actor_user_id_users"),
+            ondelete="SET NULL",
+        ),
+        sa.ForeignKeyConstraint(
+            ["organization_id"],
+            ["organizations.id"],
+            name=op.f("fk_audit_logs_organization_id_organizations"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_audit_logs")),
+    )
+    op.create_index(
+        op.f("ix_audit_logs_action"),
+        "audit_logs",
+        ["action"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_audit_logs_actor_user_id"),
+        "audit_logs",
+        ["actor_user_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_audit_logs_organization_id"),
+        "audit_logs",
+        ["organization_id"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_audit_logs_organization_id_created_at",
+        "audit_logs",
+        ["organization_id", "created_at"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_audit_logs_resource_id"),
+        "audit_logs",
+        ["resource_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_audit_logs_resource_type"),
+        "audit_logs",
+        ["resource_type"],
+        unique=False,
+    )
+    op.create_index(
+        "ix_audit_logs_resource_type_resource_id",
+        "audit_logs",
+        ["resource_type", "resource_id"],
+        unique=False,
+    )
+
 
 def downgrade() -> None:
+    # Drop audit_logs
+    op.drop_index(
+        "ix_audit_logs_resource_type_resource_id",
+        table_name="audit_logs",
+    )
+    op.drop_index(
+        op.f("ix_audit_logs_resource_type"),
+        table_name="audit_logs",
+    )
+    op.drop_index(
+        op.f("ix_audit_logs_resource_id"),
+        table_name="audit_logs",
+    )
+    op.drop_index(
+        "ix_audit_logs_organization_id_created_at",
+        table_name="audit_logs",
+    )
+    op.drop_index(
+        op.f("ix_audit_logs_organization_id"),
+        table_name="audit_logs",
+    )
+    op.drop_index(
+        op.f("ix_audit_logs_actor_user_id"),
+        table_name="audit_logs",
+    )
+    op.drop_index(
+        op.f("ix_audit_logs_action"),
+        table_name="audit_logs",
+    )
+    op.drop_table("audit_logs")
+
+    # Drop api_keys
+    op.drop_index(
+        op.f("ix_api_keys_project_id"),
+        table_name="api_keys",
+    )
+    op.drop_index(
+        op.f("ix_api_keys_key_prefix"),
+        table_name="api_keys",
+    )
+    op.drop_index(
+        op.f("ix_api_keys_environment_id"),
+        table_name="api_keys",
+    )
+    op.drop_table("api_keys")
+
     # Drop environments
     op.drop_index(
         op.f("ix_environments_project_id"),
