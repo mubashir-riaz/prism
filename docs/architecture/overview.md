@@ -36,6 +36,36 @@ flowchart LR
      - **Liveness (`GET /health`)**: A pure liveness check returning `{"status": "ok"}` with status code `200` without querying the database, indicating the process is running.
      - **Readiness (`GET /health/ready`)**: Verifies active database availability with an executed `SELECT 1` query, returning `200` (`{"status": "ready", "db": "ok"}`) when ready and `503` if the database is unreachable.
 
+## Tenancy Model
+
+Prism uses a four-level ownership hierarchy that isolates data between customers and controls access to API keys.
+
+```
+Organization
+└── Project
+    ├── Environment (dev)      ← default
+    ├── Environment (staging)
+    ├── Environment (prod)
+    └── APIKey  ──────────────── scoped to one Environment
+```
+
+### Entities
+
+| Entity | Table | Unique constraint | Notes |
+|---|---|---|---|
+| **Organization** | `organizations` | `slug` (global) | Top-level tenant. Every other resource belongs to exactly one org. |
+| **Project** | `projects` | `(organization_id, slug)` | Logical workspace within an org. |
+| **Environment** | `environments` | `(project_id, name)` | Fixed set: `dev`, `staging`, `prod`. Auto-created on project creation; `dev` is the default. |
+| **APIKey** | `api_keys` | — | Scoped to a single Project + Environment pair. Only the SHA-256 hash and an 8-character public prefix are stored; the plaintext is shown once at creation and is unrecoverable. |
+
+### Rules
+
+- An **Organization** must exist before any Project, User, or APIKey can be created.
+- A **Project** is always created with all three Environments in a single atomic transaction.
+- The **default Environment** (`dev`) cannot be deleted until a different environment is promoted to default first.
+- An **APIKey** is permanently linked to one Environment and cannot be moved; it can only be revoked.
+- **Users** belong to an Organization (not a Project) and carry a role (`OWNER`, `ADMIN`, `MEMBER`, `VIEWER`).
+
 ## Upcoming Phases
 
 > [!NOTE]
