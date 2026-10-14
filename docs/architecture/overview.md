@@ -66,6 +66,125 @@ Organization
 - An **APIKey** is permanently linked to one Environment and cannot be moved; it can only be revoked.
 - **Users** belong to an Organization (not a Project) and carry a role (`OWNER`, `ADMIN`, `MEMBER`, `VIEWER`).
 
+## Layering
+
+All backend code follows a strict five-layer stack. Imports only flow **downward** — no layer may import from a layer above it.
+
+```
+┌─────────────────────────────────────┐
+│              API Layer              │  app/api/
+│  FastAPI routers, request parsing,  │
+│  response serialization (Pydantic)  │
+├─────────────────────────────────────┤
+│            Service Layer            │  app/services/
+│  Business logic, validation rules,  │
+│  unit-of-work / transaction mgmt    │
+├─────────────────────────────────────┤
+│          Repository Layer           │  app/repositories/
+│  Async SQLAlchemy queries, CRUD,    │
+│  pagination, flush/commit/rollback  │
+├─────────────────────────────────────┤
+│            Model Layer              │  app/models/
+│  SQLAlchemy ORM declarative models  │
+│  and domain enums                   │
+├─────────────────────────────────────┤
+│           Database (Postgres)       │
+│  Tables, indexes, constraints,      │
+│  JSONB columns, foreign keys        │
+└─────────────────────────────────────┘
+```
+
+### Layer responsibilities
+
+| Layer | Package | Allowed imports |
+|---|---|---|
+| **API** | `app.api` | Services, Schemas, Exceptions, FastAPI |
+| **Service** | `app.services` | Repositories, Schemas, Models (types only), Exceptions |
+| **Repository** | `app.repositories` | Models, SQLAlchemy (`sqlalchemy.*`) |
+| **Model** | `app.models` | SQLAlchemy ORM declarations, Enums |
+| **Schema** | `app.schemas` | Pydantic only |
+
+### The golden rule — services never import SQLAlchemy directly
+
+Services are the only layer that contains business logic. They must remain **database-agnostic** so that they can be unit-tested without a real database and so that the storage engine can be swapped without touching business rules.
+
+Concretely:
+
+- ✅ A service **may** call `await self.repo.create(...)`, `await self.repo.list(...)`, etc.
+- ✅ A service **may** import model classes for type annotations.
+- ❌ A service **must not** import `sqlalchemy`, `AsyncSession`, `select`, or any other SQLAlchemy symbol for use in query construction.
+- ❌ A service **must not** call `session.execute(...)` or `session.flush()` directly.
+
+The only exception is the `AsyncSession` type annotation in `__init__` signatures — this is accepted because it is used exclusively for dependency injection (the session is passed in, not created).
+
+### Transaction semantics (unit of work)
+
+Every mutating service method wraps its repository calls in `async with self.repo.transaction()`. The `transaction()` context manager on `BaseRepository` commits on success and rolls back on any exception — whether a domain `PrismException` or an unexpected `IntegrityError`. This means:
+
+- Callers never need to manage commits or rollbacks.
+- Partial writes are impossible within a single service operation.
+- Tests can wrap operations in a savepoint and roll back cleanly after each test.
+
+## Data Model
+
+The diagram below shows every table and its primary foreign-key relationships.
+
+```
+organizations
+  id            UUID PK
+  name          VARCHAR(255)
+  slug          VARCHAR(255)  UNIQUE
+  is_active     BOOLEAN
+  created_at    TIMESTAMPTZ
+  updated_at    TIMESTAMPTZ
+        │
+        │ 1 ──────────────────────────────────────────────── ∞
+        │                                                     │
+     users                                               projects
+       id              UUID PK                             id              UUID PK
+       organization_id UUID FK ──► organizations           organization_id UUID FK ──► organizations
+       email           VARCHAR(255)  UNIQUE                name            VARCHAR(255)
+       hashed_password VARCHAR(255)                        slug            VARCHAR(255)
+       full_name       VARCHAR(255)                        description     TEXT
+       role            VARCHAR(50)                         is_archived     BOOLEAN
+       is_active       BOOLEAN                             created_at      TIMESTAMPTZ
+       last_login_at   TIMESTAMPTZ                         updated_at      TIMESTAMPTZ
+       created_at      TIMESTAMPTZ                               │
+       updated_at      TIMESTAMPTZ                               │ 1 ──────────────── ∞
+                                                                 │                    │
+                                                           environments            api_keys
+                                                             id          UUID PK     id             UUID PK
+                                                             project_id  UUID FK      project_id     UUID FK ──► projects
+                                                             name        VARCHAR(50)  environment_id UUID FK ──► environments
+                                                             is_default  BOOLEAN      name           VARCHAR(255)
+                                                             created_at  TIMESTAMPTZ  key_prefix     VARCHAR(32)
+                                                             updated_at  TIMESTAMPTZ  hashed_key     VARCHAR(255)
+                                                                                      is_active      BOOLEAN
+                                                                                      last_used_at   TIMESTAMPTZ
+                                                                                      revoked_at     TIMESTAMPTZ
+                                                                                      created_at     TIMESTAMPTZ
+                                                                                      updated_at     TIMESTAMPTZ
+
+audit_logs
+  id              UUID PK
+  organization_id UUID FK ──► organizations
+  actor_user_id   UUID FK ──► users  (nullable — NULL for system events)
+  action          VARCHAR(50)   [CREATE | UPDATE | DELETE | LOGIN | KEY_CREATED | KEY_REVOKED]
+  resource_type   VARCHAR(255)
+  resource_id     UUID          (nullable)
+  metadata_json   JSONB
+  ip_address      VARCHAR(255)  (nullable)
+  user_agent      VARCHAR(1024) (nullable)
+  created_at      TIMESTAMPTZ
+  updated_at      TIMESTAMPTZ
+
+  Indexes:
+    ix_audit_logs_organization_id_created_at  (organization_id, created_at)
+    ix_audit_logs_resource_type_resource_id   (resource_type, resource_id)
+
+  Constraint: append-only — UPDATE and DELETE are prohibited at the application layer.
+```
+
 ## Upcoming Phases
 
 > [!NOTE]
