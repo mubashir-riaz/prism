@@ -15,7 +15,7 @@ from app.main import app
 @asynccontextmanager
 async def lifespan_manager(application):
     """Manage application lifespan (startup and shutdown events).
-    
+
     Tries `asgi-lifespan.LifespanManager` if installed, falling back to
     FastAPI / Starlette's built-in `lifespan_context`.
     """
@@ -36,7 +36,7 @@ async def lifespan_manager(application):
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
     """Async httpx client fixture using ASGITransport(app) with lifespan active ('lifespan=on').
-    
+
     Ensures application lifespan events (logging initialization, database
     connectivity check, and graceful engine disposal on shutdown) execute
     for test runs.
@@ -64,16 +64,18 @@ async def test_db() -> AsyncGenerator[AsyncEngine, None]:
     -------------------------------------------------------
     This test suite is configured to expect a pre-migrated test database.
     Before executing the test suite, ensure database migrations have been applied
-    to the target database (e.g., via `alembic upgrade head` or container initialization
-    scripts in CI / Docker Compose).
+    to the target database (e.g., via `alembic upgrade head` or container
+    initialization scripts in CI / Docker Compose).
 
     Rationale:
     1. Asyncpg and Alembic's async runner use `asyncio.run()`, which conflicts
        with pytest-asyncio's active event loop when run in-process.
-    2. Decoupling migration execution from individual test invocations prevents schema
-       races during parallel or repeated test runs and aligns with standard CI/CD practices.
-    
-    This fixture verifies that the database is reachable and ready to receive queries.
+    2. Decoupling migration execution from individual test invocations prevents
+       schema races during parallel or repeated test runs and aligns with standard
+       CI/CD practices.
+
+    This fixture verifies that the database is reachable and ready to receive
+    queries.
     """
     async with engine.connect() as conn:
         await conn.execute(text("SELECT 1"))
@@ -88,11 +90,26 @@ async def db_migrated(test_db: AsyncEngine) -> AsyncGenerator[None, None]:
 
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Provide an isolated transactional async database session for tests.
-    
-    Any transactions executed during the test are rolled back at teardown
-    to maintain state isolation between tests.
+    """Provide a per-test isolated async database session.
+
+    Isolation strategy — nested SAVEPOINT:
+        Each test runs inside a database SAVEPOINT.  On teardown the outer
+        transaction is rolled back, discarding every INSERT / UPDATE / DELETE
+        the test performed without touching any pre-existing schema or data.
+
+        This is significantly faster than TRUNCATE-based isolation because no
+        DDL is emitted and no auto-vacuum / index bloat occurs.
+
+    Usage in tests::
+
+        async def test_something(db_session: AsyncSession) -> None:
+            repo = MyRepository(db_session)
+            obj = await repo.create(...)
+            assert obj.id is not None
     """
     async with async_session_factory() as session:
-        yield session
+        # Open a SAVEPOINT so we can roll back everything the test does.
+        async with session.begin_nested():
+            yield session
+        # Discard all changes made inside the test.
         await session.rollback()
