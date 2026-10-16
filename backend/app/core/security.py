@@ -9,13 +9,14 @@ API keys         : prism_<env>_<prefix12>_<secret32>, SHA-256 hashed.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, Union
+from typing import Any
 
+import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from jose import jwt
 
 from app.core.config import settings
+from app.exceptions import TokenError
 
 # ---------------------------------------------------------------------------
 # Internal Argon2id hasher (defaults: time=3, memory=65536, parallelism=4)
@@ -49,18 +50,55 @@ def needs_rehash(hashed: str) -> bool:
     return _ph.check_needs_rehash(hashed)
 
 
-ALGORITHM = "HS256"
+# ---------------------------------------------------------------------------
+# JWT utilities
+# ---------------------------------------------------------------------------
 
 
 def create_access_token(
-    subject: Union[str, Any], expires_delta: Optional[timedelta] = None
+    subject: str,
+    org_id: str,
+    role: str,
+    expires_minutes: int | None = None,
 ) -> str:
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    """
+    Create a signed JWT.
+
+    Claims
+    ------
+    sub  : user id (string)
+    org  : organisation id
+    role : user's role within the org
+    iat  : issued-at (UTC)
+    exp  : expiry (UTC)
+    """
+    now = datetime.now(timezone.utc)
+    ttl = expires_minutes if expires_minutes is not None else settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    payload: dict[str, Any] = {
+        "sub": subject,
+        "org": org_id,
+        "role": role,
+        "iat": now,
+        "exp": now + timedelta(minutes=ttl),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict[str, Any]:
+    """
+    Decode and verify *token*.
+
+    Returns the claims dict on success.
+    Raises :exc:`app.exceptions.TokenError` on invalid signature, expiry, or
+    malformed input.
+    """
+    try:
+        return jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
         )
-    to_encode = {"exp": expire, "sub": str(subject)}
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    except jwt.ExpiredSignatureError as exc:
+        raise TokenError("Token has expired.") from exc
+    except jwt.InvalidTokenError as exc:
+        raise TokenError("Token is invalid.") from exc
