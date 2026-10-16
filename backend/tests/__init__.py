@@ -1,1 +1,1 @@
-"""Test suite for Prism backend."""
+"""Prism backend test suite."""
