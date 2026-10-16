@@ -30,9 +30,16 @@ class ValidationError(PrismException):
     pass
 
 
+class TokenError(PrismException):
+    """Raised when a JWT is missing, expired, or has an invalid signature."""
+
+    pass
+
+
 __all__ = [
     "PrismException",
     "NotFoundError",
     "ConflictError",
     "ValidationError",
+    "TokenError",
 ]
