@@ -8,6 +8,9 @@ API keys         : prism_<env>_<prefix12>_<secret32>, SHA-256 hashed.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -102,3 +105,53 @@ def decode_access_token(token: str) -> dict[str, Any]:
         raise TokenError("Token has expired.") from exc
     except jwt.InvalidTokenError as exc:
         raise TokenError("Token is invalid.") from exc
+
+
+# ---------------------------------------------------------------------------
+# API key utilities
+# ---------------------------------------------------------------------------
+
+_VALID_ENVS = frozenset({"dev", "staging", "prod"})
+
+
+def generate_api_key(env: str) -> tuple[str, str, str]:
+    """
+    Generate a new API key for *env*.
+
+    Returns
+    -------
+    plaintext  : the full key shown to the user **once** (never stored).
+    key_prefix : ``prism_<env>_<prefix12>`` — stored indexed for lookup.
+    hashed_key : SHA-256 hex digest of *plaintext* — stored for verification.
+
+    Format
+    ------
+    ``prism_<env>_<prefix12>_<secret32>``
+
+    * ``prefix12``  — 12 URL-safe chars (``secrets.token_urlsafe(9)[:12]``)
+    * ``secret32``  — 32 URL-safe chars (``secrets.token_urlsafe(24)[:32]``)
+    """
+    if env not in _VALID_ENVS:
+        raise ValueError(f"env must be one of {sorted(_VALID_ENVS)}, got {env!r}")
+
+    prefix12 = secrets.token_urlsafe(9)[:12]
+    secret32 = secrets.token_urlsafe(24)[:32]
+    plaintext = f"prism_{env}_{prefix12}_{secret32}"
+    key_prefix = f"prism_{env}_{prefix12}"
+    hashed_key = hash_api_key(plaintext)
+    return plaintext, key_prefix, hashed_key
+
+
+def hash_api_key(plaintext: str) -> str:
+    """Return the SHA-256 hex digest of *plaintext*."""
+    return hashlib.sha256(plaintext.encode()).hexdigest()
+
+
+def verify_api_key(plaintext: str, hashed: str) -> bool:
+    """
+    Timing-safe comparison of ``sha256(plaintext)`` against *hashed*.
+
+    Uses :func:`hmac.compare_digest` to prevent timing attacks.
+    """
+    candidate = hash_api_key(plaintext)
+    return hmac.compare_digest(candidate, hashed)
