@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = "postgresql+asyncpg://postgres:postgres@localhost:5432/prism"
     LOG_LEVEL: str = "INFO"
 
+    # Auth — SECRET_KEY has no default; the app will refuse to start if it is
+    # absent from the environment (pydantic-settings raises ValidationError).
+    SECRET_KEY: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    JWT_ALGORITHM: str = "HS256"
+    PASSWORD_MIN_LENGTH: int = 8
+
     @model_validator(mode="after")
     def validate_database_url(self) -> "Settings":
         if self.APP_ENV in ("staging", "prod"):
