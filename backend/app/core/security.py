@@ -1,20 +1,55 @@
+"""
+Prism security utilities — passwords, JWTs, and API keys.
+
+Password hashing : Argon2id via argon2-cffi.
+JWT              : PyJWT (HS256 by default, algorithm from settings).
+API keys         : prism_<env>_<prefix12>_<secret32>, SHA-256 hashed.
+"""
+
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union
+
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 from jose import jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# ---------------------------------------------------------------------------
+# Internal Argon2id hasher (defaults: time=3, memory=65536, parallelism=4)
+# ---------------------------------------------------------------------------
+_ph = PasswordHasher()
+
+
+# ---------------------------------------------------------------------------
+# Password utilities
+# ---------------------------------------------------------------------------
+
+
+def hash_password(plain: str) -> str:
+    """Return an Argon2id hash of *plain*."""
+    return _ph.hash(plain)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    """Return True if *plain* matches *hashed*, False on mismatch."""
+    try:
+        return _ph.verify(hashed, plain)
+    except VerifyMismatchError:
+        return False
+
+
+def needs_rehash(hashed: str) -> bool:
+    """
+    Return True if *hashed* was produced with outdated Argon2 parameters.
+    Call this after a successful verify and re-hash if True.
+    """
+    return _ph.check_needs_rehash(hashed)
+
+
 ALGORITHM = "HS256"
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
 
 
 def create_access_token(
