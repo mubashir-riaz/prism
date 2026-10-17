@@ -60,6 +60,10 @@ class LoginRequest(BaseModel):
 
     email: EmailStr = Field(..., description="Registered email address.")
     password: str = Field(..., description="Account password.")
+    organization_slug: Optional[str] = Field(
+        None,
+        description="Optional organization slug to scope the login.",
+    )
 
 
 # ---------------------------------------------------------------------------
