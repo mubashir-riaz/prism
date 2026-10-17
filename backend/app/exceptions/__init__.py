@@ -36,10 +36,21 @@ class TokenError(PrismException):
     pass
 
 
+class AuthError(PrismException):
+    """Raised on authentication failures (invalid credentials, inactive account).
+
+    Deliberately non-specific: never distinguish "user not found" from "wrong
+    password" to prevent user-enumeration attacks.
+    """
+
+    pass
+
+
 __all__ = [
     "PrismException",
     "NotFoundError",
     "ConflictError",
     "ValidationError",
     "TokenError",
+    "AuthError",
 ]
