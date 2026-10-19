@@ -10,12 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.exceptions import AuthError, NotFoundError
-from app.models.enums import AuditAction, UserRole
+from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.api_key import APIKeyCreate, APIKeyCreateResponse, APIKeyRead
 from app.services.api_key_service import APIKeyService
-from app.services.audit_service import AuditService
 
 router = APIRouter()
 
@@ -149,19 +148,7 @@ async def revoke_key(
     key = await service.get_api_key(id)
     await _get_project_or_403(key.project_id, current_user, db)
 
-    revoked = await service.revoke_api_key(id)
-
-    # Emit audit event for revocation
-    audit = AuditService(db)
-    await audit.record(
-        org_id=current_user.organization_id,
-        actor_id=current_user.id,
-        action=AuditAction.KEY_REVOKED,
-        resource_type="api_key",
-        resource_id=revoked.id,
-        metadata={"key_prefix": revoked.key_prefix, "name": revoked.name},
-    )
-
+    revoked = await service.revoke_api_key(id, actor_user_id=current_user.id)
     return APIKeyRead.model_validate(revoked)
 
 
