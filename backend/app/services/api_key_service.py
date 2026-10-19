@@ -31,6 +31,7 @@ class APIKeyService:
         else:
             self.repo = APIKeyRepository(session)
             self._session = session
+        self.audit_service = AuditService(self._session)
 
     async def create_api_key(
         self,
@@ -38,6 +39,11 @@ class APIKeyService:
         environment_id: Union[uuid.UUID, str],
         name: str,
         actor_user_id: Optional[Union[uuid.UUID, str]] = None,
+        ip: Optional[str] = None,
+        ua: Optional[str] = None,
+        *,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> tuple[APIKey, str]:
         """Create and persist an API key, returning the record and the unrecoverable plaintext key.
 
@@ -48,6 +54,8 @@ class APIKeyService:
 
         An ``AuditAction.KEY_CREATED`` event is emitted upon successful creation.
         """
+        client_ip = ip or ip_address
+        client_ua = ua or user_agent
         async with self.repo.transaction():
             # Load the environment with its project (eager) to get org_id for audit
             stmt = (
@@ -77,14 +85,15 @@ class APIKeyService:
             )
 
             # Emit audit event
-            audit_service = AuditService(self._session)
-            await audit_service.record(
+            await self.audit_service.record(
                 org_id=environment.project.organization_id,
                 actor_id=actor_user_id,
                 action=AuditAction.KEY_CREATED,
                 resource_type="api_key",
                 resource_id=record.id,
                 metadata={"key_prefix": key_prefix, "environment": env_str, "name": name},
+                ip=client_ip,
+                ua=client_ua,
             )
 
             return record, plaintext
@@ -131,12 +140,54 @@ class APIKeyService:
         """Retrieve an API key by its ID, raising NotFoundError if missing."""
         return await self.repo.get(id)
 
-    async def revoke_api_key(self, id: Union[uuid.UUID, str]) -> APIKey:
-        """Revoke an API key by setting is_active to False and revoked_at to current timestamp."""
+    async def revoke_api_key(
+        self,
+        id: Union[uuid.UUID, str],
+        actor_user_id: Optional[Union[uuid.UUID, str]] = None,
+        ip: Optional[str] = None,
+        ua: Optional[str] = None,
+        *,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> APIKey:
+        """Revoke an API key by setting is_active to False, recording revoked_at, and logging audit event."""
+        client_ip = ip or ip_address
+        client_ua = ua or user_agent
         async with self.repo.transaction():
-            key = await self.get_api_key(id)
+            parsed_id = uuid.UUID(str(id)) if isinstance(id, str) else id
+            stmt = (
+                select(APIKey)
+                .where(APIKey.id == parsed_id)
+                .options(selectinload(APIKey.project))
+            )
+            result = await self._session.execute(stmt)
+            key = result.scalars().first()
+            if key is None:
+                raise NotFoundError(f"APIKey with id '{id}' not found.")
+
             now = datetime.now(timezone.utc)
-            return await self.repo.update(key, is_active=False, revoked_at=now)
+            revoked = await self.repo.update(key, is_active=False, revoked_at=now)
+
+            org_id = key.project.organization_id if key.project else None
+            if org_id is None:
+                from app.repositories.project_repository import ProjectRepository
+                project = await ProjectRepository(self._session).get_or_none(key.project_id)
+                if project:
+                    org_id = project.organization_id
+
+            # Emit audit event
+            await self.audit_service.record(
+                org_id=org_id,
+                actor_id=actor_user_id,
+                action=AuditAction.KEY_REVOKED,
+                resource_type="api_key",
+                resource_id=revoked.id,
+                metadata={"key_prefix": revoked.key_prefix, "name": revoked.name},
+                ip=client_ip,
+                ua=client_ua,
+            )
+
+            return revoked
 
     async def list_keys_for_project(
         self,
