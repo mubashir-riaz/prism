@@ -16,6 +16,7 @@ from app.repositories.audit_log_repository import AuditLogRepository
 from app.repositories.organization_repository import OrganizationRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import RegisterRequest, TokenResponse
+from app.services.audit_service import AuditService
 
 
 class AuthService:
@@ -31,13 +32,22 @@ class AuthService:
         self._session = session
         self.user_repo = UserRepository(session)
         self.org_repo = OrganizationRepository(session)
-        self.audit_repo = AuditLogRepository(session)
+        self.audit_service = AuditService(session)
+        self.audit_repo = self.audit_service.repo
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    async def register(self, payload: RegisterRequest) -> User:
+    async def register(
+        self,
+        payload: RegisterRequest,
+        ip: Optional[str] = None,
+        ua: Optional[str] = None,
+        *,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> User:
         """Register a new user inside an existing organisation.
 
         Steps
@@ -49,6 +59,8 @@ class AuthService:
         5. Emit an ``AuditAction.CREATE`` event for ``resource_type="user"``.
         6. Commit and return the new :class:`User`.
         """
+        client_ip = ip or ip_address
+        client_ua = ua or user_agent
         async with self.user_repo.transaction():
             # 1. Resolve organisation
             org = await self.org_repo.get_by_slug(payload.organization_slug)
@@ -73,13 +85,15 @@ class AuthService:
             )
 
             # 5. Audit event
-            await self.audit_repo.create(
-                organization_id=org.id,
-                actor_user_id=user.id,
+            await self.audit_service.record(
+                org_id=org.id,
+                actor_id=user.id,
                 action=AuditAction.CREATE,
                 resource_type="user",
                 resource_id=user.id,
-                metadata_json={"email": str(payload.email), "role": payload.role.value},
+                metadata={"email": str(payload.email), "role": payload.role.value},
+                ip=client_ip,
+                ua=client_ua,
             )
 
             # 6. Commit happens when the transaction context manager exits cleanly
@@ -90,6 +104,11 @@ class AuthService:
         email: str,
         password: str,
         organization_slug: str | None = None,
+        ip: Optional[str] = None,
+        ua: Optional[str] = None,
+        *,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> User:
         """Verify credentials and return the authenticated :class:`User`.
 
@@ -100,6 +119,8 @@ class AuthService:
         on *any* failure: unknown org, unknown email, wrong password, or inactive
         account. This prevents user-enumeration via timing or distinct messages.
         """
+        client_ip = ip or ip_address
+        client_ua = ua or user_agent
         async with self.user_repo.transaction():
             if organization_slug:
                 # Resolve org — failure is opaque to the caller
@@ -128,13 +149,15 @@ class AuthService:
             )
 
             # Audit event
-            await self.audit_repo.create(
-                organization_id=user.organization_id,
-                actor_user_id=user.id,
+            await self.audit_service.record(
+                org_id=user.organization_id,
+                actor_id=user.id,
                 action=AuditAction.LOGIN,
                 resource_type="user",
                 resource_id=user.id,
-                metadata_json={"email": email},
+                metadata={"email": email},
+                ip=client_ip,
+                ua=client_ua,
             )
 
             return user
