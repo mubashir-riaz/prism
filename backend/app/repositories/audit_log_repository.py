@@ -1,6 +1,7 @@
 """AuditLog repository for database operations."""
 
 from typing import Any, Optional, Sequence
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +33,14 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         resource_type: Optional[str] = None,
     ) -> tuple[Sequence[AuditLog], int]:
         """List audit logs for an organization with pagination, returning (items, total_count)."""
-        filters: dict[str, Any] = {"organization_id": organization_id}
+        parsed_org_id = organization_id
+        if isinstance(organization_id, str):
+            try:
+                parsed_org_id = uuid.UUID(organization_id)
+            except (ValueError, TypeError):
+                parsed_org_id = organization_id
+
+        filters: dict[str, Any] = {"organization_id": parsed_org_id}
         if action is not None:
             filters["action"] = action
         if resource_type is not None:
@@ -47,8 +55,15 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         limit: int = 100,
     ) -> tuple[Sequence[AuditLog], int]:
         """List audit logs targeting a specific resource, returning (items, total_count)."""
+        parsed_resource_id = resource_id
+        if isinstance(resource_id, str):
+            try:
+                parsed_resource_id = uuid.UUID(resource_id)
+            except (ValueError, TypeError):
+                parsed_resource_id = resource_id
+
         filters: dict[str, Any] = {
             "resource_type": resource_type,
-            "resource_id": resource_id,
+            "resource_id": parsed_resource_id,
         }
         return await self.list(offset=offset, limit=limit, filters=filters)
