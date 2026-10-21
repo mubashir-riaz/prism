@@ -225,3 +225,73 @@ async def test_list_active_excludes_revoked_key(db_session: AsyncSession) -> Non
     assert active_total == 1
     assert active_rec.id in active_ids
     assert revoked_rec.id not in active_ids
+
+
+# ---------------------------------------------------------------------------
+# authenticate
+# ---------------------------------------------------------------------------
+
+
+async def test_authenticate_accepts_plaintext_key(db_session: AsyncSession) -> None:
+    """authenticate() succeeds with valid plaintext key and updates last_used_at."""
+    org = await _make_org(db_session, "key-svc-auth-accept-org")
+    project = await _make_project(db_session, org, "key-svc-auth-accept-proj")
+    dev_env = await _get_dev_env(project)
+
+    svc = APIKeyService(db_session)
+    record, plaintext = await svc.create_api_key(
+        project_id=project.id,
+        environment_id=dev_env.id,
+        name="auth-accept-key",
+    )
+
+    authed = await svc.authenticate(plaintext)
+    assert authed is not None
+    assert authed.id == record.id
+    assert authed.last_used_at is not None
+
+
+async def test_authenticate_rejects_corrupted_key(db_session: AsyncSession) -> None:
+    """authenticate() returns None when the key secret or prefix is corrupted."""
+    org = await _make_org(db_session, "key-svc-auth-corrupt-org")
+    project = await _make_project(db_session, org, "key-svc-auth-corrupt-proj")
+    dev_env = await _get_dev_env(project)
+
+    svc = APIKeyService(db_session)
+    record, plaintext = await svc.create_api_key(
+        project_id=project.id,
+        environment_id=dev_env.id,
+        name="auth-corrupt-key",
+    )
+
+    # 1. Corrupt the secret segment
+    corrupted_secret = plaintext[:-4] + "xxxx"
+    assert await svc.authenticate(corrupted_secret) is None
+
+    # 2. Corrupt prefix
+    corrupted_prefix = "prism_dev_wrongprefix_" + plaintext.split("_")[-1]
+    assert await svc.authenticate(corrupted_prefix) is None
+
+    # 3. Invalid format
+    assert await svc.authenticate("invalid_key_format") is None
+    assert await svc.authenticate("prism_dev") is None
+
+
+async def test_revoked_key_fails_authentication(db_session: AsyncSession) -> None:
+    """A revoked API key fails authentication even if secret is valid."""
+    org = await _make_org(db_session, "key-svc-auth-revoked-org")
+    project = await _make_project(db_session, org, "key-svc-auth-revoked-proj")
+    dev_env = await _get_dev_env(project)
+
+    svc = APIKeyService(db_session)
+    record, plaintext = await svc.create_api_key(
+        project_id=project.id,
+        environment_id=dev_env.id,
+        name="auth-revoked-key",
+    )
+
+    # Revoke key
+    await svc.revoke_api_key(record.id)
+
+    # Authenticate must fail
+    assert await svc.authenticate(plaintext) is None
