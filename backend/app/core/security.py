@@ -134,8 +134,8 @@ def generate_api_key(env: str) -> tuple[str, str, str]:
     if env not in _VALID_ENVS:
         raise ValueError(f"env must be one of {sorted(_VALID_ENVS)}, got {env!r}")
 
-    prefix12 = secrets.token_urlsafe(9)[:12]
-    secret32 = secrets.token_urlsafe(24)[:32]
+    prefix12 = secrets.token_urlsafe(16).replace("_", "").replace("-", "")[:12]
+    secret32 = secrets.token_urlsafe(32).replace("_", "").replace("-", "")[:32]
     plaintext = f"prism_{env}_{prefix12}_{secret32}"
     key_prefix = f"prism_{env}_{prefix12}"
     hashed_key = hash_api_key(plaintext)
