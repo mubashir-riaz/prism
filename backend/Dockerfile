@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir .[dev]
 COPY alembic.ini .
 COPY alembic/ ./alembic/
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 
 EXPOSE 8000
 
