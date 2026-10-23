@@ -2,30 +2,36 @@
 
 Creates a canonical demo dataset:
   - Org:     Acme AI  (slug: acme)
-  - User:    owner@acme.test  (role: OWNER)
+  - User:    owner@acme.test  (role: OWNER, dev password: password)
   - Project: Demo Project  (slug: demo)
   - Envs:    dev (default), staging, prod  — auto-created by ProjectService
   - API key: default-dev  (attached to the dev environment)
 
 Re-running the script is safe: each resource is skipped when its slug or
-email is already present in the database.
+email is already present in the database. Existing users are not re-hashed.
 
-Usage (from the backend/ directory, with the venv active):
+Usage (from backend/ directory or container /app):
     python -m scripts.seed_data
+or from repository root:
+    python scripts/seed_data.py
 """
 
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import sys
 
 # ---------------------------------------------------------------------------
-# Make sure the app package is importable when the script is run from the
-# backend/ directory via  `python -m scripts.seed_data`.
+# Ensure the backend directory is in sys.path when running as a script
 # ---------------------------------------------------------------------------
+backend_dir = Path(__file__).resolve().parent.parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
 
 from sqlalchemy import select
 
+from app.core.security import hash_password
 from app.db.session import async_session_factory
 from app.models.enums import EnvironmentName, UserRole
 from app.models.organization import Organization
@@ -55,6 +61,7 @@ ORG_SLUG = "acme"
 OWNER_EMAIL = "owner@acme.test"
 OWNER_ROLE = UserRole.OWNER
 OWNER_FULL_NAME = "Acme Owner"
+OWNER_PASSWORD = "password"  # DEV ONLY CREDENTIAL
 
 PROJECT_NAME = "Demo Project"
 PROJECT_SLUG = "demo"
@@ -77,13 +84,20 @@ def _skip(msg: str) -> None:
     print(f"  [skip] {msg}")
 
 
+def _warn(msg: str) -> None:
+    print(f"  [warn] {msg}")
+
+
 # ---------------------------------------------------------------------------
 # Main seed coroutine
 # ---------------------------------------------------------------------------
 
 
-async def seed() -> None:
-    async with async_session_factory() as session:
+async def seed(session_factory=None) -> None:
+    factory = session_factory or async_session_factory
+    plaintext_key: str | None = None
+
+    async with factory() as session:
         # ------------------------------------------------------------------
         # 1. Organization
         # ------------------------------------------------------------------
@@ -111,11 +125,15 @@ async def seed() -> None:
         if user is not None:
             _skip(f"User '{OWNER_EMAIL}' already exists (id={user.id})")
         else:
+            _warn("DEV-ONLY CREDENTIAL: Seeding demo owner with password 'password'.")
+            _warn("DO NOT USE THIS CREDENTIAL IN PRODUCTION ENVIRONMENTS!")
+            hashed_pw = hash_password(OWNER_PASSWORD)
             user = await user_svc.create_user(
                 org_id=org.id,
                 email=OWNER_EMAIL,
                 role=OWNER_ROLE,
                 full_name=OWNER_FULL_NAME,
+                hashed_password=hashed_pw,
             )
             _ok(f"Created user '{user.email}' with role '{user.role}' (id={user.id})")
 
@@ -154,7 +172,7 @@ async def seed() -> None:
         if dev_env is None:
             # Defensive: should not happen when ProjectService created the project,
             # but guard against edge-cases where the project was seeded without envs.
-            print(f"  [warn] Dev environment not found for project '{PROJECT_SLUG}'.")
+            _warn(f"Dev environment not found for project '{PROJECT_SLUG}'.")
             sys.exit(1)
 
         _ok(
@@ -179,7 +197,6 @@ async def seed() -> None:
         result = await session.execute(existing_keys_stmt)
         existing_key: APIKey | None = result.scalars().first()
 
-        plaintext_key: str | None = None
         if existing_key is not None:
             _skip(
                 f"Active API key '{API_KEY_NAME}' already exists "
@@ -198,14 +215,17 @@ async def seed() -> None:
             )
 
     # ------------------------------------------------------------------
-    # Print the plaintext key *outside* the session block so it is the
-    # very last thing written, making it easy to spot in the output.
+    # Print summary & credentials
     # ------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("  DEV CREDENTIALS & ACCESS INFO (DEV ONLY):")
+    print(f"  Owner Email:    {OWNER_EMAIL}")
+    print(f"  Owner Password: {OWNER_PASSWORD}")
+    print("  WARNING: This is a dev-only credential. Do not use in production!")
     if plaintext_key is not None:
-        print("\n" + "=" * 60)
-        print("  PLAINTEXT API KEY (shown once — store it securely):")
+        print("\n  PLAINTEXT API KEY (shown once — store it securely):")
         print(f"  {plaintext_key}")
-        print("=" * 60 + "\n")
+    print("=" * 60 + "\n")
 
     print("Seed complete.\n")
 
