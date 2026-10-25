@@ -19,6 +19,9 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "structlog>=24.1.0",
     "python-json-logger>=2.0.7",
+    "pyjwt>=2.8.0",
+    "argon2-cffi>=23.1.0",
+    "email-validator>=2.1.0",
 ]
 
 [project.optional-dependencies]

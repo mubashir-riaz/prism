@@ -125,6 +125,122 @@ Every mutating service method wraps its repository calls in `async with self.rep
 - Partial writes are impossible within a single service operation.
 - Tests can wrap operations in a savepoint and roll back cleanly after each test.
 
+## Auth & RBAC
+
+Prism implements a comprehensive, defense-in-depth authentication and role-based access control (RBAC) model.
+
+### Authentication Model
+
+Prism enforces a dual authentication model tailored for humans and machines:
+
+1. **User Authentication (JWT)**:
+   - Intended for human users interacting with the management APIs and web console.
+   - Users authenticate with their email and password via `POST /v1/auth/login`. Passwords are verified against Argon2id hashes.
+   - Upon successful verification, the API issues a signed JSON Web Token (JWT) using the `HS256` algorithm (configurable via `JWT_ALGORITHM` and `SECRET_KEY`).
+   - Tokens carry standard claims: `sub` (User UUID), `org_id` (Organization UUID), `role` (UserRole), `exp` (expiration timestamp), and `iat` (issued-at timestamp).
+   - Protected endpoints authenticate requests via the `Authorization: Bearer <token>` header, resolved by the `get_current_user` FastAPI dependency.
+
+2. **Machine Authentication (API Keys)**:
+   - Intended for backend services, SDKs, agentic pipelines, and proxy middleware making automated calls.
+   - API keys are scoped to a specific `(Project, Environment)` pair and carry machine-level authorization.
+   - Clients supply their key via the `X-API-Key` HTTP header.
+   - Verified by the `get_current_api_key` dependency which eagerly resolves project and environment context.
+
+### Role Hierarchy
+
+Prism defines an organization-level role hierarchy:
+
+```
+OWNER > ADMIN > MEMBER > VIEWER
+```
+
+| Role | Privileges | Example Actions |
+|---|---|---|
+| **`OWNER`** | Full organization control, billing, destructive operations, role management. | Transfer organization ownership, manage all projects, invite admins, create/revoke any API keys. |
+| **`ADMIN`** | Management of projects, environments, API keys, and members. | Create and revoke API keys (`/v1/keys`), manage projects, invite members and viewers. |
+| **`MEMBER`** | Standard operational contributor. | Run evaluations, view traces, log prompts, interact with development environments. |
+| **`VIEWER`** | Read-only observer. | Inspect metrics, review evaluation results, inspect audit logs and dashboards without mutation privileges. |
+
+Role enforcement is handled via the `require_role(*roles)` dependency factory in `app.api.deps`. Routes decorated with `require_role(UserRole.OWNER, UserRole.ADMIN)` reject callers holding `MEMBER` or `VIEWER` roles with HTTP 401 `AuthError`.
+
+### API Key Architecture
+
+API keys follow a strict format engineered for security, usability, and constant-time database lookup:
+
+```
+prism_<env>_<prefix12>_<secret32>
+```
+
+- **Prefix**: `prism_<env>_<prefix12>` (e.g. `prism_dev_a1b2c3d4e5f6`).
+  - Stored in the indexed `key_prefix` column.
+  - Allows the database to locate the exact candidate key record in $O(1)$ time without scanning tables or performing expensive comparisons across inactive keys.
+- **Secret**: 32 cryptographically secure, URL-safe random characters (`secrets.token_urlsafe`).
+- **Plaintext Key**: Returned **exactly once** in the response body of `POST /v1/keys`. It is never logged and never stored in plaintext.
+- **Verification**: The database stores `hashed_key`, which is the SHA-256 digest (`hashlib.sha256`) of the full plaintext key. Verification uses timing-attack-resistant constant-time comparison (`hmac.compare_digest`).
+
+### Consistent Error Response Shape
+
+All API errors return a uniform JSON error envelope across the entire platform:
+
+```json
+{
+  "error": {
+    "type": "<ExceptionClassName>",
+    "message": "<human-readable explanation>",
+    "details": {}
+  }
+}
+```
+
+Standard domain exception mappings:
+
+| Exception | HTTP Status | Response Header | Description |
+|---|---|---|---|
+| `AuthError` | `401 Unauthorized` | `WWW-Authenticate: Bearer` | Invalid credentials, account inactive, or insufficient RBAC privileges. Prevents user enumeration by using uniform messages. |
+| `TokenError` | `401 Unauthorized` | `WWW-Authenticate: Bearer` | Expired, forged, or malformed JWT access token. |
+| `NotFoundError` | `404 Not Found` | — | Requested resource (e.g., Organization, Project, API Key) does not exist. |
+| `ConflictError` | `409 Conflict` | — | Conflict with existing state (e.g., duplicate slug or duplicate active resource). |
+| `ValidationError` | `422 Unprocessable Entity` | — | Business validation failure (e.g., password below minimum length). |
+| `PrismException` | `400 Bad Request` | — | Fallback catch-all for any unhandled Prism domain exception. |
+
+### Authentication Sequence Diagram
+
+The following sequence illustrates a user authenticating, receiving a JWT token, and querying a protected endpoint:
+
+```
++--------+             +--------------------+             +----------+             +----------------------+
+| Client |             |   /v1/auth/login   |             | Database |             |   Protected Endpoint |
++--------+             +--------------------+             +----------+             +----------------------+
+    |                            |                             |                             |
+    |  1. POST /v1/auth/login    |                             |                             |
+    |     {email, password}      |                             |                             |
+    |--------------------------->|                             |                             |
+    |                            |  2. Query user by email     |                             |
+    |                            |---------------------------->|                             |
+    |                            |  3. Return user record      |                             |
+    |                            |<----------------------------|                             |
+    |                            |                             |                             |
+    |                            |  4. Verify Argon2id hash    |                             |
+    |                            |  5. Emit LOGIN audit event  |                             |
+    |                            |  6. Issue signed JWT token  |                             |
+    |                            |                             |                             |
+    |  7. 200 OK                 |                             |                             |
+    |     {access_token, ...}    |                             |                             |
+    |<---------------------------|                             |                             |
+    |                                                                                        |
+    |  8. GET /v1/auth/me (or /v1/keys)                                                      |
+    |     Header: Authorization: Bearer <access_token>                                       |
+    |--------------------------------------------------------------------------------------->|
+    |                                                                                        |
+    |                                                              9. Decode JWT & check sig |
+    |                                                             10. Fetch user by sub UUID |
+    |                                                             11. Enforce active & role  |
+    |                                                                                        |
+    |  12. 200 OK                                                                            |
+    |      {id, email, role, ...}                                                            |
+    |<---------------------------------------------------------------------------------------|
+```
+
 ## Data Model
 
 The diagram below shows every table and its primary foreign-key relationships.
@@ -188,4 +304,4 @@ audit_logs
 ## Upcoming Phases
 
 > [!NOTE]
-> Core operational capabilities—including distributed request and prompt tracing, evaluation pipelines (golden datasets, heuristic evaluators, LLM-as-a-judge), experiment tracking, and automated A/B routing—will be added in subsequent phases. Phase 1 establishes the rock-solid foundation: FastAPI core architecture, configuration management, asynchronous database connectivity, health probing, and containerization.
+> Phase 1 (Foundation, configuration, async DB, health checks), Phase 2 (Tenancy, layered architecture, repository pattern), and Phase 3 (Auth, RBAC, API keys, and audit logging) are complete. Core operational capabilities—including distributed request and prompt tracing, evaluation pipelines (golden datasets, heuristic evaluators, LLM-as-a-judge), experiment tracking, and automated A/B routing—will be added in subsequent phases.

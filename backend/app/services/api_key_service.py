@@ -1,16 +1,20 @@
 """APIKey business logic service."""
 
 from datetime import datetime, timezone
-import hashlib
-import secrets
 from typing import Optional, Sequence, Union
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.core.security import generate_api_key, verify_api_key
 from app.exceptions import NotFoundError
 from app.models.api_key import APIKey
+from app.models.environment import Environment
+from app.models.enums import AuditAction
 from app.repositories.api_key_repository import APIKeyRepository
+from app.services.audit_service import AuditService
 
 
 class APIKeyService:
@@ -23,25 +27,53 @@ class APIKeyService:
     def __init__(self, session: Union[AsyncSession, APIKeyRepository]) -> None:
         if isinstance(session, APIKeyRepository):
             self.repo = session
+            self._session = session.session
         else:
             self.repo = APIKeyRepository(session)
+            self._session = session
+        self.audit_service = AuditService(self._session)
 
     async def create_api_key(
         self,
         project_id: Union[uuid.UUID, str],
         environment_id: Union[uuid.UUID, str],
         name: str,
+        actor_user_id: Optional[Union[uuid.UUID, str]] = None,
+        ip: Optional[str] = None,
+        ua: Optional[str] = None,
+        *,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> tuple[APIKey, str]:
         """Create and persist an API key, returning the record and the unrecoverable plaintext key.
 
-        The plaintext key is generated using secrets.token_urlsafe(32) and returned
-        only once. Only the prefix and SHA256 hashed secret are stored in the database.
+        The environment is loaded to determine the env string (dev/staging/prod).
+        The plaintext key is generated via ``generate_api_key(env)`` from
+        ``core/security.py`` and returned only once. Only the key prefix and
+        SHA-256 hashed key are stored in the database.
+
+        An ``AuditAction.KEY_CREATED`` event is emitted upon successful creation.
         """
+        client_ip = ip or ip_address
+        client_ua = ua or user_agent
         async with self.repo.transaction():
-            raw_secret = secrets.token_urlsafe(32)
-            key_prefix = f"prism_{raw_secret[:8]}"
-            plaintext_key = f"{key_prefix}_{raw_secret[8:]}"
-            hashed_key = hashlib.sha256(plaintext_key.encode("utf-8")).hexdigest()
+            # Load the environment with its project (eager) to get org_id for audit
+            stmt = (
+                select(Environment)
+                .where(Environment.id == environment_id)
+                .options(selectinload(Environment.project))
+            )
+            result = await self._session.execute(stmt)
+            environment = result.scalars().first()
+            if environment is None:
+                raise NotFoundError(
+                    f"Environment with id '{environment_id}' not found."
+                )
+
+            env_str = environment.name.value  # EnvironmentName enum → "dev"/"staging"/"prod"
+
+            # Generate properly formatted API key
+            plaintext, key_prefix, hashed_key = generate_api_key(env_str)
 
             record = await self.repo.create(
                 project_id=project_id,
@@ -52,18 +84,110 @@ class APIKeyService:
                 is_active=True,
             )
 
-            return record, plaintext_key
+            # Emit audit event
+            await self.audit_service.record(
+                org_id=environment.project.organization_id,
+                actor_id=actor_user_id,
+                action=AuditAction.KEY_CREATED,
+                resource_type="api_key",
+                resource_id=record.id,
+                metadata={"key_prefix": key_prefix, "environment": env_str, "name": name},
+                ip=client_ip,
+                ua=client_ua,
+            )
+
+            return record, plaintext
+
+    async def authenticate(self, plaintext_key: str) -> Optional[APIKey]:
+        """Authenticate an API key by its plaintext value.
+
+        Parse the key to extract the key_prefix (first three segments:
+        ``prism_<env>_<prefix>``), look it up, and verify the hash.
+
+        On success the caller should update ``last_used_at`` via the
+        request-scoped session (do **not** commit inside this method).
+
+        Returns the :class:`APIKey` record on success, or ``None`` if
+        authentication fails (not found / inactive / revoked / hash mismatch).
+        """
+        # Key format: prism_<env>_<prefix12>_<secret32>
+        parts = plaintext_key.split("_", 3)  # ['prism', '<env>', '<prefix12>', '<secret32>']
+        if len(parts) != 4 or parts[0] != "prism":
+            return None
+
+        # key_prefix is the first three segments: prism_<env>_<prefix12>
+        key_prefix = f"{parts[0]}_{parts[1]}_{parts[2]}"
+
+        record = await self.repo.get_by_prefix(key_prefix)
+        if record is None:
+            return None
+
+        # Reject inactive or revoked keys
+        if not record.is_active or record.revoked_at is not None:
+            return None
+
+        # Timing-safe hash comparison
+        if not verify_api_key(plaintext_key, record.hashed_key):
+            return None
+
+        # Update last_used_at — flushed but NOT committed here;
+        # the request-scoped session will commit.
+        record.last_used_at = datetime.now(timezone.utc)
+
+        return record
 
     async def get_api_key(self, id: Union[uuid.UUID, str]) -> APIKey:
         """Retrieve an API key by its ID, raising NotFoundError if missing."""
         return await self.repo.get(id)
 
-    async def revoke_api_key(self, id: Union[uuid.UUID, str]) -> APIKey:
-        """Revoke an API key by setting is_active to False and revoked_at to current timestamp."""
+    async def revoke_api_key(
+        self,
+        id: Union[uuid.UUID, str],
+        actor_user_id: Optional[Union[uuid.UUID, str]] = None,
+        ip: Optional[str] = None,
+        ua: Optional[str] = None,
+        *,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> APIKey:
+        """Revoke an API key by setting is_active to False, recording revoked_at, and logging audit event."""
+        client_ip = ip or ip_address
+        client_ua = ua or user_agent
         async with self.repo.transaction():
-            key = await self.get_api_key(id)
+            parsed_id = uuid.UUID(str(id)) if isinstance(id, str) else id
+            stmt = (
+                select(APIKey)
+                .where(APIKey.id == parsed_id)
+                .options(selectinload(APIKey.project))
+            )
+            result = await self._session.execute(stmt)
+            key = result.scalars().first()
+            if key is None:
+                raise NotFoundError(f"APIKey with id '{id}' not found.")
+
             now = datetime.now(timezone.utc)
-            return await self.repo.update(key, is_active=False, revoked_at=now)
+            revoked = await self.repo.update(key, is_active=False, revoked_at=now)
+
+            org_id = key.project.organization_id if key.project else None
+            if org_id is None:
+                from app.repositories.project_repository import ProjectRepository
+                project = await ProjectRepository(self._session).get_or_none(key.project_id)
+                if project:
+                    org_id = project.organization_id
+
+            # Emit audit event
+            await self.audit_service.record(
+                org_id=org_id,
+                actor_id=actor_user_id,
+                action=AuditAction.KEY_REVOKED,
+                resource_type="api_key",
+                resource_id=revoked.id,
+                metadata={"key_prefix": revoked.key_prefix, "name": revoked.name},
+                ip=client_ip,
+                ua=client_ua,
+            )
+
+            return revoked
 
     async def list_keys_for_project(
         self,

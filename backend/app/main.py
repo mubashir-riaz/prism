@@ -17,6 +17,7 @@ from app.core.logging import (
     get_logger,
 )
 from app.db.session import engine
+from app.exceptions.handlers import register_exception_handlers
 
 logger = get_logger(__name__)
 
@@ -73,6 +74,9 @@ def create_app() -> FastAPI:
 
     # Attach request ID tracking middleware
     app.add_middleware(RequestIDMiddleware)
+
+    # Map domain exceptions to consistent HTTP error responses
+    register_exception_handlers(app)
 
     # Mount top-level API router
     app.include_router(api_router)

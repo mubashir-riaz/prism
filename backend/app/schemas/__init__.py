@@ -10,6 +10,12 @@ from app.schemas.audit_log import (
     AuditLogCreate,
     AuditLogRead,
 )
+from app.schemas.auth import (
+    LoginRequest,
+    MeResponse,
+    RegisterRequest,
+    TokenResponse,
+)
 from app.schemas.environment import (
     EnvironmentCreate,
     EnvironmentRead,
@@ -32,23 +38,35 @@ from app.schemas.user import (
 )
 
 __all__ = [
+    # Auth
+    "RegisterRequest",
+    "LoginRequest",
+    "TokenResponse",
+    "MeResponse",
+    # Organisation
     "OrganizationCreate",
     "OrganizationRead",
     "OrganizationUpdate",
+    # User
     "UserCreate",
     "UserRead",
     "UserUpdate",
+    # Project
     "ProjectCreate",
     "ProjectRead",
     "ProjectUpdate",
+    # Environment
     "EnvironmentCreate",
     "EnvironmentRead",
     "EnvironmentUpdate",
+    # API key
     "APIKeyCreate",
     "APIKeyRead",
     "APIKeyUpdate",
     "APIKeyCreateResponse",
+    # Audit log
     "AuditLogCreate",
     "AuditLogRead",
 ]
+
 

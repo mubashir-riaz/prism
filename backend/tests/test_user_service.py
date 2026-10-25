@@ -170,3 +170,20 @@ async def test_deactivate_user_sets_is_active_false(db_session: AsyncSession) ->
     deactivated = await svc.deactivate_user(user.id)
 
     assert deactivated.is_active is False
+
+
+async def test_create_user_with_hashed_password(db_session: AsyncSession) -> None:
+    """create_user() accepts and persists a custom hashed_password."""
+    org = await _make_org(db_session, "user-svc-hash-org")
+    svc = UserService(db_session)
+
+    custom_hash = "$argon2id$v=19$m=65536,t=3,p=4$somecustomhash"
+    user = await svc.create_user(
+        org_id=org.id,
+        email="hashed_user@example.com",
+        role=UserRole.ADMIN,
+        full_name="Hashed User",
+        hashed_password=custom_hash,
+    )
+
+    assert user.hashed_password == custom_hash

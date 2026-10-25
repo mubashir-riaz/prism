@@ -31,11 +31,9 @@ class UserService:
         email: str,
         role: UserRole = UserRole.MEMBER,
         full_name: Optional[str] = None,
+        hashed_password: str = "",
     ) -> User:
-        """Create a new user within an organization after checking email uniqueness.
-
-        Note: Password handling and hashing will be wired in Phase 3.
-        """
+        """Create a new user within an organization after checking email uniqueness."""
         async with self.repo.transaction():
             existing = await self.repo.get_by_email(email)
             if existing:
@@ -46,7 +44,7 @@ class UserService:
                 email=email,
                 role=role,
                 full_name=full_name,
-                hashed_password="",
+                hashed_password=hashed_password,
             )
 
     async def create_from_schema(self, data: UserCreate) -> User:
