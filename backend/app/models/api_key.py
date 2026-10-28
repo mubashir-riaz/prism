@@ -13,6 +13,7 @@ from app.models.base import TimestampedBase
 if TYPE_CHECKING:
     from app.models.environment import Environment
     from app.models.project import Project
+    from app.models.trace import Trace
 
 
 class APIKey(TimestampedBase):
@@ -68,6 +69,12 @@ class APIKey(TimestampedBase):
     environment: Mapped["Environment"] = relationship(
         "Environment",
         back_populates="api_keys",
+    )
+    traces: Mapped[list["Trace"]] = relationship(
+        "Trace",
+        back_populates="api_key",
+        # No cascade — traces survive key deletion (api_key_id → SET NULL).
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:
