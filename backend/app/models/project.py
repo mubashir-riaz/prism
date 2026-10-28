@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.api_key import APIKey
     from app.models.environment import Environment
     from app.models.organization import Organization
+    from app.models.trace import Trace
 
 
 class Project(TimestampedBase):
@@ -60,6 +61,11 @@ class Project(TimestampedBase):
     )
     api_keys: Mapped[list["APIKey"]] = relationship(
         "APIKey",
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+    traces: Mapped[list["Trace"]] = relationship(
+        "Trace",
         back_populates="project",
         cascade="all, delete-orphan",
     )
