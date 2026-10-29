@@ -6,6 +6,7 @@ from app.repositories.base import BaseRepository
 from app.repositories.environment_repository import EnvironmentRepository
 from app.repositories.organization_repository import OrganizationRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.trace_repository import TraceRepository
 from app.repositories.user_repository import UserRepository
 
 __all__ = [
@@ -16,5 +17,6 @@ __all__ = [
     "EnvironmentRepository",
     "APIKeyRepository",
     "AuditLogRepository",
+    "TraceRepository",
 ]
 
