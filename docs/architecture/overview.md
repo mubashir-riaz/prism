@@ -57,6 +57,7 @@ Organization
 | **Project** | `projects` | `(organization_id, slug)` | Logical workspace within an org. |
 | **Environment** | `environments` | `(project_id, name)` | Fixed set: `dev`, `staging`, `prod`. Auto-created on project creation; `dev` is the default. |
 | **APIKey** | `api_keys` | — | Scoped to a single Project + Environment pair. Only the SHA-256 hash and an 8-character public prefix are stored; the plaintext is shown once at creation and is unrecoverable. |
+| **Trace** | `traces` | — | Immutable record of a single LLM inference call. Tenant context (org / project / environment) is derived from the API key at ingestion time; clients cannot override it. Survives API key deletion (`api_key_id → SET NULL`). |
 
 ### Rules
 
@@ -241,6 +242,59 @@ The following sequence illustrates a user authenticating, receiving a JWT token,
     |<---------------------------------------------------------------------------------------|
 ```
 
+## Trace Ingestion Flow
+
+The diagram below shows the synchronous ingestion path introduced in Phase 4. Every LLM call made by a client application travels through this path before being committed to Postgres.
+
+```
+Client Application
+      │
+      │  POST /v1/traces
+      │  X-API-Key: prism_dev_<prefix>_<secret>
+      │  Body: { feature, model, prompt, completion, tokens, ... }
+      ▼
+┌─────────────────────────────────┐
+│   FastAPI Router (traces.py)    │
+│   ingest_trace()                │
+└────────────┬────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────┐
+│   get_current_api_key dep       │
+│   • Extract X-API-Key header    │
+│   • Authenticate via prefix     │
+│     lookup + SHA-256 verify     │
+│   • Reject if inactive/revoked  │
+└────────────┬────────────────────┘
+             │ APIKey record
+             ▼
+┌─────────────────────────────────┐
+│   TraceService.create_trace()   │
+│   • Derive org/project/env from │
+│     the APIKey (never payload)  │
+│   • Build Trace row             │
+│   • Emit AuditAction.CREATE     │
+└────────────┬────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────┐
+│   TraceRepository.create()      │
+│   • INSERT INTO traces          │
+│   • flush → refresh             │
+└────────────┬────────────────────┘
+             │
+             ▼
+        PostgreSQL
+        (traces table)
+             │
+             ▼
+      HTTP 201 Created
+      Body: { id, created_at }
+      Header: X-Request-ID: <request_id or trace UUID>
+```
+
+**Security invariant:** tenant context (`organization_id`, `project_id`, `environment_id`, `api_key_id`) is sourced exclusively from the authenticated `APIKey` record. `TraceIn` enforces `extra = "forbid"`, so clients cannot supply those fields even accidentally.
+
 ## Data Model
 
 The diagram below shows every table and its primary foreign-key relationships.
@@ -299,6 +353,35 @@ audit_logs
     ix_audit_logs_resource_type_resource_id   (resource_type, resource_id)
 
   Constraint: append-only — UPDATE and DELETE are prohibited at the application layer.
+
+traces
+  id               UUID PK
+  organization_id  UUID FK ──► organizations  (ondelete=CASCADE)
+  project_id       UUID FK ──► projects       (ondelete=CASCADE)
+  environment_id   UUID FK ──► environments   (ondelete=CASCADE)
+  api_key_id       UUID FK ──► api_keys       (ondelete=SET NULL, nullable)
+  request_id       VARCHAR(128)  (nullable, indexed — client correlation ID)
+  feature          VARCHAR(64)   NOT NULL
+  model            VARCHAR(128)  NOT NULL
+  prompt           TEXT          NOT NULL
+  completion       TEXT          NOT NULL
+  prompt_tokens    INTEGER       NOT NULL  DEFAULT 0
+  completion_tokens INTEGER      NOT NULL  DEFAULT 0
+  total_tokens     INTEGER       NOT NULL  DEFAULT 0
+  latency_ms       INTEGER       (nullable)
+  cost_usd         NUMERIC(12,6) (nullable)
+  prompt_version   VARCHAR(64)   (nullable — Phase 10 replaces with FK)
+  metadata_json    JSONB         NOT NULL  DEFAULT '{}'
+  created_at       TIMESTAMPTZ
+  updated_at       TIMESTAMPTZ
+
+  Indexes:
+    ix_traces_project_id_created_at      (project_id, created_at DESC)
+    ix_traces_feature_created_at         (feature, created_at DESC)
+    ix_traces_model_created_at           (model, created_at DESC)
+    ix_traces_organization_id_created_at (organization_id, created_at DESC)
+
+  api_key_id → SET NULL on key deletion so historical traces are preserved across key rotation.
 ```
 
 ## Upcoming Phases
