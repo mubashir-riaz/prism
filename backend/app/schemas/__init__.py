@@ -31,6 +31,11 @@ from app.schemas.project import (
     ProjectRead,
     ProjectUpdate,
 )
+from app.schemas.trace import (
+    TraceCreated,
+    TraceIn,
+    TraceOut,
+)
 from app.schemas.user import (
     UserCreate,
     UserRead,
@@ -67,6 +72,9 @@ __all__ = [
     # Audit log
     "AuditLogCreate",
     "AuditLogRead",
+    # Trace
+    "TraceIn",
+    "TraceOut",
+    "TraceCreated",
 ]
-
 

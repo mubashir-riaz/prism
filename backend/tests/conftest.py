@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional
 import uuid
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
@@ -345,3 +346,64 @@ async def api_key_headers(
         project=project,
         environment=dev_env,
     )
+
+
+# ---------------------------------------------------------------------------
+# Trace fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def api_key_for_project(
+    seeded_org: SeededOrg,
+    db_session: AsyncSession,
+) -> APIKeyHeaders:
+    """Create a project + API key for the seeded org's dev environment.
+
+    Identical to ``api_key_headers`` but named explicitly for trace tests
+    to make fixture intent clear. Returns an :class:`APIKeyHeaders` instance
+    carrying the key record, project, environment, and plaintext key.
+    """
+    proj_svc = ProjectService(db_session)
+    unique_suffix = uuid.uuid4().hex[:8]
+    project = await proj_svc.create_project(
+        ProjectCreate(
+            organization_id=seeded_org.org.id,
+            name=f"Trace Project {unique_suffix}",
+            slug=f"trace-proj-{unique_suffix}",
+        )
+    )
+    dev_env = next(e for e in project.environments if e.name == EnvironmentName.DEV)
+    key_svc = APIKeyService(db_session)
+    record, plaintext = await key_svc.create_api_key(
+        project_id=project.id,
+        environment_id=dev_env.id,
+        name=f"trace-api-key-{unique_suffix}",
+        actor_user_id=seeded_org.owner.id,
+    )
+    await db_session.commit()
+    return APIKeyHeaders(
+        headers={"X-API-Key": plaintext},
+        key_record=record,
+        plaintext=plaintext,
+        project=project,
+        environment=dev_env,
+    )
+
+
+@pytest.fixture
+def sample_trace_payload() -> dict:
+    """A valid TraceIn-compatible dict ready for POST /v1/traces or TraceIn(**payload)."""
+    return {
+        "feature": "search",
+        "model": "gpt-4o",
+        "prompt": "What is the capital of France?",
+        "completion": "The capital of France is Paris.",
+        "prompt_tokens": 9,
+        "completion_tokens": 8,
+        "latency_ms": 250,
+        "cost_usd": "0.000125",
+        "prompt_version": "v1",
+        "request_id": "test-req-001",
+        "metadata_json": {"source": "pytest", "env": "test"},
+    }

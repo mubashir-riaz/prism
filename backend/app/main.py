@@ -35,7 +35,8 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         bind_request_id(request_id)
         try:
             response = await call_next(request)
-            response.headers[REQUEST_ID_HEADER] = request_id
+            if REQUEST_ID_HEADER not in response.headers:
+                response.headers[REQUEST_ID_HEADER] = request_id
             return response
         finally:
             clear_request_id()

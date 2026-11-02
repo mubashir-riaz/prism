@@ -4,12 +4,13 @@ Prism is an open-source, self-hosted platform that sits between your application
 
 ## Project Status
 
-**Current Milestone:** Phase 3 Complete (Authentication, Role-Based Access Control, API Key Management & Audit Logging)
+**Current Milestone:** Phase 4 Complete (Prompt Logging & Synchronous Trace Ingestion)
 
 - [x] **Phase 1**: Core foundation, configuration management, async database connectivity, health checks, Docker containerization.
 - [x] **Phase 2**: Multi-tenancy (Organization -> Project -> Environment), layered architecture, repository pattern, unit-of-work transactions.
 - [x] **Phase 3**: Authentication & RBAC (Argon2id passwords, JWT issuance, `X-API-Key` machine auth, role hierarchy, audit logging).
-- [ ] **Phase 4**: Prompt logging & distributed request tracing.
+- [x] **Phase 4**: Prompt logging & distributed request tracing.
+- [ ] **Phase 5**: Async trace ingestion pipeline & background processing.
 
 ---
 
@@ -36,6 +37,12 @@ The Prism backend exposes the following API endpoints under `/v1` and root healt
 | `POST` | `/v1/keys` | Create an API key scoped to a project and environment; returns plaintext once. | Bearer JWT (`OWNER`, `ADMIN`) |
 | `GET` | `/v1/keys` | List API key metadata for a project (never returns secret or plaintext). | Bearer JWT (`OWNER`, `ADMIN`) |
 | `DELETE` | `/v1/keys/{id}` | Revoke an API key immediately. | Bearer JWT (`OWNER`, `ADMIN`) |
+
+### Trace Ingestion & Observability (/v1/traces)
+| Method | Endpoint | Description | Auth |
+|---|---|---|---|
+| POST | /v1/traces | Ingest a single LLM trace record; derives tenant scoping from key. | X-API-Key |
+| GET | /v1/traces/{id} | Fetch a trace by ID scoped to authenticated user's organization. | Bearer JWT |
 
 ### Development & Smoke Testing
 | Method | Endpoint | Description | Auth |

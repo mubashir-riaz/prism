@@ -13,6 +13,7 @@ from app.models.enums import EnvironmentName
 if TYPE_CHECKING:
     from app.models.api_key import APIKey
     from app.models.project import Project
+    from app.models.trace import Trace
 
 
 class Environment(TimestampedBase):
@@ -47,6 +48,11 @@ class Environment(TimestampedBase):
     )
     api_keys: Mapped[list["APIKey"]] = relationship(
         "APIKey",
+        back_populates="environment",
+        cascade="all, delete-orphan",
+    )
+    traces: Mapped[list["Trace"]] = relationship(
+        "Trace",
         back_populates="environment",
         cascade="all, delete-orphan",
     )
