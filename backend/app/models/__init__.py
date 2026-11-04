@@ -5,6 +5,7 @@ from app.models.audit_log import AuditLog
 from app.models.base import BaseModel, TimestampedBase
 from app.models.enums import AuditAction, EnvironmentName, UserRole
 from app.models.environment import Environment
+from app.models.model_pricing import ModelPricing
 from app.models.organization import Organization
 from app.models.project import Project
 from app.models.trace import Trace
@@ -22,5 +23,6 @@ __all__ = [
     "Environment",
     "APIKey",
     "AuditLog",
+    "ModelPricing",
     "Trace",
 ]
