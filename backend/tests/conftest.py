@@ -393,7 +393,12 @@ async def api_key_for_project(
 
 @pytest.fixture
 def sample_trace_payload() -> dict:
-    """A valid TraceIn-compatible dict ready for POST /v1/traces or TraceIn(**payload)."""
+    """A valid TraceIn-compatible dict ready for POST /v1/traces or TraceIn(**payload).
+
+    ``cost_usd`` is intentionally omitted so tests exercise the auto-compute
+    path introduced in Step 3: when no pricing row exists for the model,
+    ``cost_usd`` is stored as NULL without error.
+    """
     return {
         "feature": "search",
         "model": "gpt-4o",
@@ -402,7 +407,6 @@ def sample_trace_payload() -> dict:
         "prompt_tokens": 9,
         "completion_tokens": 8,
         "latency_ms": 250,
-        "cost_usd": "0.000125",
         "prompt_version": "v1",
         "request_id": "test-req-001",
         "metadata_json": {"source": "pytest", "env": "test"},
