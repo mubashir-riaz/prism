@@ -1,5 +1,6 @@
 """Trace business logic service."""
 
+from decimal import Decimal
 from typing import Union
 import uuid
 
@@ -15,6 +16,7 @@ from app.models.user import User
 from app.repositories.trace_repository import TraceRepository
 from app.schemas.trace import TraceIn
 from app.services.audit_service import AuditService
+from app.services.cost_service import calculate_cost
 
 
 class TraceService:
@@ -51,6 +53,14 @@ class TraceService:
         payload, but this comment and the explicit assignment below make the
         security boundary unambiguous for future readers.
 
+        Cost resolution
+        ---------------
+        When the caller supplies ``cost_usd`` it is used as-is (backward compat).
+        When ``cost_usd`` is omitted the service attempts to auto-compute it via
+        :func:`~app.services.cost_service.calculate_cost`.  If the model is not
+        in the ``model_pricing`` table the value is stored as ``NULL`` and a
+        warning is logged — no error is raised.
+
         An ``AuditAction.CREATE`` event is emitted upon successful persistence.
 
         Args:
@@ -84,6 +94,19 @@ class TraceService:
                 )
             organization_id = project.organization_id
 
+            # --- Resolve cost_usd ---
+            # Caller-supplied value takes priority (backward compatibility).
+            # When absent, attempt auto-computation from the model_pricing table.
+            # calculate_cost returns None for unknown models (logs a warning).
+            cost_usd: Decimal | None = payload.cost_usd
+            if cost_usd is None:
+                cost_usd = await calculate_cost(
+                    db=self._session,
+                    model=payload.model,
+                    prompt_tokens=payload.prompt_tokens,
+                    completion_tokens=payload.completion_tokens,
+                )
+
             # --- Build and persist the trace ---
             trace = await self.repo.create(
                 organization_id=organization_id,
@@ -99,7 +122,7 @@ class TraceService:
                 completion_tokens=payload.completion_tokens,
                 total_tokens=payload.total_tokens,
                 latency_ms=payload.latency_ms,
-                cost_usd=payload.cost_usd,
+                cost_usd=cost_usd,
                 prompt_version=payload.prompt_version,
                 metadata_json=payload.metadata_json,
             )
