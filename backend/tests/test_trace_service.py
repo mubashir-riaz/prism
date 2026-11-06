@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError
 from app.models.enums import EnvironmentName
+from app.models.model_pricing import ModelPricing
 from app.models.organization import Organization
 from app.models.project import Project
 from app.repositories.audit_log_repository import AuditLogRepository
@@ -329,3 +330,142 @@ async def test_list_traces_wrong_org_raises_not_found(db_session: AsyncSession) 
             limit=10,
             offset=0,
         )
+
+
+
+# ---------------------------------------------------------------------------
+# create_trace — cost_usd auto-computation
+# ---------------------------------------------------------------------------
+
+
+async def _make_api_key(session: AsyncSession, org: Organization, slug: str):
+    """Helper: create project + api key for cost tests, return (api_key, dev_env)."""
+    project = await _make_project(session, org, slug)
+    dev_env = next(e for e in project.environments if e.name == EnvironmentName.DEV)
+    key_svc = APIKeyService(session)
+    api_key, _ = await key_svc.create_api_key(
+        project_id=project.id,
+        environment_id=dev_env.id,
+        name=f"cost-key-{slug}",
+    )
+    return api_key
+
+
+async def _seed_pricing(
+    session: AsyncSession,
+    provider: str,
+    model: str,
+    input_price: str,
+    output_price: str,
+) -> ModelPricing:
+    """Insert a ModelPricing row directly for cost-calculation tests."""
+    pricing = ModelPricing(
+        provider=provider,
+        model=model,
+        input_price_per_1k=Decimal(input_price),
+        output_price_per_1k=Decimal(output_price),
+    )
+    session.add(pricing)
+    await session.flush()
+    await session.refresh(pricing)
+    return pricing
+
+
+@pytest.mark.asyncio
+async def test_create_trace_without_cost_usd_computes_from_pricing(
+    db_session: AsyncSession,
+) -> None:
+    """When cost_usd is omitted, create_trace auto-computes it from model_pricing.
+
+    Pricing row: gpt-4o  input=$0.005/1k  output=$0.015/1k
+    Tokens: prompt=100, completion=200
+    Expected cost = (100/1000 * 0.005) + (200/1000 * 0.015)
+                  = 0.0005 + 0.003
+                  = 0.003500
+    """
+    org = await _make_org(db_session, "cost-auto-org")
+    await _seed_pricing(
+        db_session,
+        provider="openai",
+        model="gpt-4o",
+        input_price="0.005000",
+        output_price="0.015000",
+    )
+    api_key = await _make_api_key(db_session, org, "cost-auto-proj")
+
+    svc = TraceService(db_session)
+    trace = await svc.create_trace(
+        api_key=api_key,
+        payload=_trace_payload(
+            model="gpt-4o",
+            prompt_tokens=100,
+            completion_tokens=200,
+            # cost_usd intentionally omitted
+        ),
+    )
+
+    assert trace.cost_usd is not None
+    assert trace.cost_usd == Decimal("0.003500")
+
+
+@pytest.mark.asyncio
+async def test_create_trace_explicit_cost_usd_bypasses_auto_compute(
+    db_session: AsyncSession,
+) -> None:
+    """When cost_usd is supplied by the caller, it is stored as-is (backward compat).
+
+    Even if model_pricing has a different value for the same model, the
+    caller-supplied cost_usd must win.
+    """
+    org = await _make_org(db_session, "cost-explicit-org")
+    await _seed_pricing(
+        db_session,
+        provider="openai",
+        model="gpt-4o",
+        input_price="0.005000",
+        output_price="0.015000",
+    )
+    api_key = await _make_api_key(db_session, org, "cost-explicit-proj")
+
+    caller_cost = Decimal("0.999999")
+    svc = TraceService(db_session)
+    trace = await svc.create_trace(
+        api_key=api_key,
+        payload=_trace_payload(
+            model="gpt-4o",
+            prompt_tokens=100,
+            completion_tokens=200,
+            cost_usd=caller_cost,  # explicitly provided
+        ),
+    )
+
+    # Must be the caller's value, not the auto-computed 0.003500
+    assert trace.cost_usd == caller_cost
+
+
+@pytest.mark.asyncio
+async def test_create_trace_no_cost_usd_no_pricing_row_stores_null(
+    db_session: AsyncSession,
+) -> None:
+    """When cost_usd is omitted and the model has no pricing row, cost_usd is NULL.
+
+    No exception must be raised — the trace is persisted successfully.
+    """
+    org = await _make_org(db_session, "cost-null-org")
+    # Deliberately do NOT seed any pricing row for this model
+    api_key = await _make_api_key(db_session, org, "cost-null-proj")
+
+    svc = TraceService(db_session)
+    trace = await svc.create_trace(
+        api_key=api_key,
+        payload=_trace_payload(
+            model="unknown-model-with-no-pricing",
+            prompt_tokens=50,
+            completion_tokens=25,
+            # cost_usd omitted; model unknown → should fall back to NULL
+        ),
+    )
+
+    # Trace must be persisted successfully with cost_usd = NULL
+    assert trace.id is not None
+    assert trace.cost_usd is None
