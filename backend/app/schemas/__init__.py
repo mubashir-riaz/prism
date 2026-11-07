@@ -26,6 +26,7 @@ from app.schemas.organization import (
     OrganizationRead,
     OrganizationUpdate,
 )
+from app.schemas.pricing import ModelPricingOut
 from app.schemas.project import (
     ProjectCreate,
     ProjectRead,
@@ -72,9 +73,10 @@ __all__ = [
     # Audit log
     "AuditLogCreate",
     "AuditLogRead",
+    # Pricing
+    "ModelPricingOut",
     # Trace
     "TraceIn",
     "TraceOut",
     "TraceCreated",
 ]
-
