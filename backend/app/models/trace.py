@@ -35,7 +35,15 @@ class Trace(TimestampedBase):
         Index("ix_traces_project_id_created_at", "project_id", "created_at"),
         Index("ix_traces_feature_created_at", "feature", "created_at"),
         Index("ix_traces_model_created_at", "model", "created_at"),
-        Index("ix_traces_organization_id_created_at", "organization_id", "created_at"),
+        # Covers GET /v1/traces: WHERE org = ? ORDER BY created_at DESC, id DESC.
+        # The trailing `id` column eliminates the extra sort step at page boundaries
+        # when the cursor row-comparison (created_at, id) < (ts, uid) is evaluated.
+        Index(
+            "ix_traces_org_created_at_id",
+            "organization_id",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
     )
 
     # -------------------------------------------------------------------------
