@@ -1,5 +1,6 @@
 """Trace business logic service."""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Union
 import uuid
@@ -14,9 +15,10 @@ from app.models.project import Project
 from app.models.trace import Trace
 from app.models.user import User
 from app.repositories.trace_repository import TraceRepository
-from app.schemas.trace import TraceIn
+from app.schemas.trace import TraceIn, TraceListOut
 from app.services.audit_service import AuditService
 from app.services.cost_service import calculate_cost
+from app.utils.cursor import decode_cursor, encode_cursor
 
 
 class TraceService:
@@ -211,3 +213,72 @@ class TraceService:
             limit=limit,
             offset=offset,
         )
+
+    async def list_traces(
+        self,
+        db: AsyncSession,
+        *,
+        org_id: uuid.UUID,
+        model: str | None,
+        feature: str | None,
+        since: datetime | None,
+        until: datetime | None,
+        cursor: str | None,
+        limit: int,
+    ) -> TraceListOut:
+        """Return a cursor-paginated page of traces scoped to an organisation.
+
+        This method is the Phase-2 replacement for the offset-based
+        :meth:`list_traces_for_user`.  It delegates filtering and keyset
+        pagination entirely to :meth:`TraceRepository.list_traces` and handles
+        the cursor encode/decode boundary so the route layer stays thin.
+
+        Cursor contract
+        ---------------
+        * When ``cursor`` is ``None`` the first page (most-recent traces) is
+          returned.
+        * When ``cursor`` is a non-empty string it is decoded via
+          :func:`~app.utils.cursor.decode_cursor`.  ``InvalidCursorError`` is
+          intentionally **not** caught here — it bubbles up to the route handler
+          which translates it into an HTTP 400 response.
+        * When a next page exists, ``next_cursor`` is built from the last row
+          of the returned page via :func:`~app.utils.cursor.encode_cursor`.
+
+        Args:
+            db:      Async database session forwarded to the repository.
+            org_id:  Organisation scope — derived from the authenticated
+                     principal, never from the caller's query string.
+            model:   Optional exact-match filter on ``Trace.model``.
+            feature: Optional exact-match filter on ``Trace.feature``.
+            since:   Optional inclusive lower bound on ``Trace.created_at``.
+            until:   Optional inclusive upper bound on ``Trace.created_at``.
+            cursor:  Raw opaque cursor string from the query parameter, or
+                     ``None`` for the first page.
+            limit:   Maximum number of items in the returned page.
+
+        Returns:
+            :class:`~app.schemas.trace.TraceListOut` with the page of traces
+            and an optional ``next_cursor`` for the following page.
+        """
+        # Decode cursor string → (datetime, UUID) if provided.
+        # InvalidCursorError is intentionally not caught; the route turns it into HTTP 400.
+        decoded_cursor = decode_cursor(cursor) if cursor is not None else None
+
+        rows, has_next = await self.repo.list_traces(
+            db,
+            org_id=org_id,
+            model=model,
+            feature=feature,
+            since=since,
+            until=until,
+            cursor=decoded_cursor,
+            limit=limit,
+        )
+
+        # Build next_cursor from the tail of the returned page.
+        next_cursor: str | None = None
+        if has_next and rows:
+            last = rows[-1]
+            next_cursor = encode_cursor(last.created_at, last.id)
+
+        return TraceListOut(items=rows, next_cursor=next_cursor)
