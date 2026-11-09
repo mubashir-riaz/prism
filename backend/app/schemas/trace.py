@@ -177,6 +177,18 @@ class TraceOut(BaseModel):
     created_at: datetime
 
 
+class TraceListOut(BaseModel):
+    """Paginated list of traces returned by the GET /v1/traces endpoint.
+
+    ``next_cursor`` is an opaque string that, when passed as the ``cursor``
+    query parameter on the next request, resumes the result set from exactly
+    where this page left off.  It is ``None`` when no further pages exist.
+    """
+
+    items: list[TraceOut]
+    next_cursor: str | None
+
+
 class TraceCreated(BaseModel):
     """Minimal receipt returned immediately after a successful trace ingestion.
 
