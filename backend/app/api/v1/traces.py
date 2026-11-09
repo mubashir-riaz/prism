@@ -1,18 +1,20 @@
-"""Trace ingestion and debug retrieval endpoints."""
+"""Trace ingestion, query, and debug retrieval endpoints."""
 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_api_key, get_current_user
 from app.db.session import get_db
 from app.models.api_key import APIKey
 from app.models.user import User
-from app.schemas.trace import TraceCreated, TraceIn, TraceOut
+from app.schemas.trace import TraceCreated, TraceIn, TraceListOut, TraceOut
 from app.services.trace_service import TraceService
+from app.utils.cursor import InvalidCursorError
 
 router = APIRouter()
 
@@ -51,6 +53,59 @@ async def ingest_trace(
     )
 
     return TraceCreated.model_validate(trace)
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/traces — cursor-paginated trace list
+#
+# IMPORTANT: this route MUST be declared before GET /{trace_id}.
+# FastAPI evaluates routes in declaration order; if /{trace_id} came first,
+# the literal path "/v1/traces" would be matched with trace_id="" and FastAPI
+# would return 422 "trace_id is not a valid UUID" before reaching this handler.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "",
+    response_model=TraceListOut,
+    status_code=status.HTTP_200_OK,
+    summary="List traces",
+    description=(
+        "Return a cursor-paginated list of traces scoped to the authenticated "
+        "API key's organisation.  Supports filtering by model, feature, and "
+        "time range.  Pass ``cursor`` from a previous response's ``next_cursor`` "
+        "to retrieve the following page."
+    ),
+)
+async def list_traces(
+    model: str | None = Query(None, description="Filter by exact model name."),
+    feature: str | None = Query(None, description="Filter by exact feature name."),
+    since: datetime | None = Query(None, description="Inclusive lower bound on created_at (ISO-8601)."),
+    until: datetime | None = Query(None, description="Inclusive upper bound on created_at (ISO-8601)."),
+    cursor: str | None = Query(None, description="Opaque pagination cursor from a previous response."),
+    limit: int = Query(50, ge=1, le=200, description="Maximum number of traces to return (1-200)."),
+    db: AsyncSession = Depends(get_db),
+    api_key: APIKey = Depends(get_current_api_key),
+) -> TraceListOut:
+    """Return a cursor-paginated list of traces for the authenticated organisation."""
+    # org_id is derived from the authenticated API key's project — never from
+    # the query string — so tenants cannot read each other's traces.
+    org_id: uuid.UUID = api_key.project.organization_id
+
+    service = TraceService(db)
+    try:
+        return await service.list_traces(
+            db,
+            org_id=org_id,
+            model=model,
+            feature=feature,
+            since=since,
+            until=until,
+            cursor=cursor,
+            limit=limit,
+        )
+    except InvalidCursorError:
+        raise HTTPException(status_code=400, detail="Invalid cursor.")
 
 
 # ---------------------------------------------------------------------------
