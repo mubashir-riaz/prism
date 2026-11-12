@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     PASSWORD_MIN_LENGTH: int = 8
 
+    # LLM
+    OPENAI_API_KEY: Optional[str] = None
+    LLM_DEFAULT_MODEL: str = "gpt-4o-mini"
+
     @model_validator(mode="after")
     def validate_database_url(self) -> "Settings":
         if self.APP_ENV in ("staging", "prod"):
