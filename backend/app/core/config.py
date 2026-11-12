@@ -26,8 +26,9 @@ class Settings(BaseSettings):
     PASSWORD_MIN_LENGTH: int = 8
 
     # LLM
-    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: str | None = None
     LLM_DEFAULT_MODEL: str = "gpt-4o-mini"
+    LLM_PROVIDER: str = "openai"
 
     @model_validator(mode="after")
     def validate_database_url(self) -> "Settings":
