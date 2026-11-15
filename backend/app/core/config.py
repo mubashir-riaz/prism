@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     LLM_DEFAULT_MODEL: str = "gpt-4o-mini"
     LLM_PROVIDER: str = "openai"
 
+    # Gemini
+    GEMINI_API_KEY: str | None = None
+    GEMINI_DEFAULT_MODEL: str = "gemini-2.0-flash"
+
     @model_validator(mode="after")
     def validate_database_url(self) -> "Settings":
         if self.APP_ENV in ("staging", "prod"):
