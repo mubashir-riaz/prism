@@ -11,6 +11,7 @@ from app.models.base import TimestampedBase
 
 if TYPE_CHECKING:
     from app.models.api_key import APIKey
+    from app.models.dataset import Dataset
     from app.models.environment import Environment
     from app.models.organization import Organization
     from app.models.trace import Trace
@@ -68,6 +69,12 @@ class Project(TimestampedBase):
         "Trace",
         back_populates="project",
         cascade="all, delete-orphan",
+    )
+    datasets: Mapped[list["Dataset"]] = relationship(
+        "Dataset",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        lazy="raise",
     )
 
     def __repr__(self) -> str:

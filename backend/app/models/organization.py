@@ -8,6 +8,7 @@ from app.models.base import TimestampedBase
 
 if TYPE_CHECKING:
     from app.models.audit_log import AuditLog
+    from app.models.dataset import Dataset
     from app.models.project import Project
     from app.models.user import User
 
@@ -49,6 +50,12 @@ class Organization(TimestampedBase):
         "AuditLog",
         back_populates="organization",
         cascade="all, delete-orphan",
+    )
+    datasets: Mapped[list["Dataset"]] = relationship(
+        "Dataset",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        lazy="raise",
     )
 
     def __repr__(self) -> str:
