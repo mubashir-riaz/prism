@@ -16,6 +16,8 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
 )
+from app.schemas.dataset import DatasetIn, DatasetOut, DatasetRow
+from app.schemas.dataset_version import DatasetVersionDetail, DatasetVersionOut
 from app.schemas.environment import (
     EnvironmentCreate,
     EnvironmentRead,
@@ -79,4 +81,11 @@ __all__ = [
     "TraceIn",
     "TraceOut",
     "TraceCreated",
+    # Dataset
+    "DatasetRow",
+    "DatasetIn",
+    "DatasetOut",
+    # DatasetVersion
+    "DatasetVersionOut",
+    "DatasetVersionDetail",
 ]
