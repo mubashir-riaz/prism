@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.admin import router as admin_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.datasets import router as datasets_router
 from app.api.v1.health import router as health_router
 from app.api.v1.keys import router as keys_router
 from app.api.v1.pricing import router as pricing_router
@@ -15,6 +16,7 @@ api_v1_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_v1_router.include_router(keys_router, prefix="/keys", tags=["api-keys"])
 api_v1_router.include_router(pricing_router, prefix="/pricing", tags=["pricing"])
 api_v1_router.include_router(traces_router, prefix="/traces", tags=["traces"])
+api_v1_router.include_router(datasets_router, prefix="/datasets", tags=["datasets"])
 # DEV-ONLY: Admin router for smoke testing RBAC
 api_v1_router.include_router(admin_router, prefix="/admin", tags=["admin"])
 
