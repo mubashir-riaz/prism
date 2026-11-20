@@ -22,9 +22,14 @@ from fastapi.responses import JSONResponse
 from app.exceptions import (
     AuthError,
     ConflictError,
+    DatasetNotFoundError,
+    EmptyDatasetError,
+    FileTooLargeError,
     NotFoundError,
     PrismException,
+    RowValidationError,
     TokenError,
+    TooManyRowsError,
     ValidationError,
 )
 
@@ -78,6 +83,22 @@ async def _handle_token_error(request: Request, exc: TokenError) -> JSONResponse
     )
 
 
+async def _handle_file_too_large(request: Request, exc: FileTooLargeError) -> JSONResponse:
+    return JSONResponse(status_code=413, content=_error_body(exc))
+
+
+async def _handle_empty_dataset(request: Request, exc: EmptyDatasetError) -> JSONResponse:
+    return JSONResponse(status_code=422, content=_error_body(exc))
+
+
+async def _handle_too_many_rows(request: Request, exc: TooManyRowsError) -> JSONResponse:
+    return JSONResponse(status_code=422, content=_error_body(exc))
+
+
+async def _handle_row_validation(request: Request, exc: RowValidationError) -> JSONResponse:
+    return JSONResponse(status_code=422, content=_error_body(exc))
+
+
 async def _handle_prism_exception(request: Request, exc: PrismException) -> JSONResponse:
     """Catch-all for any PrismException subclass not matched above → HTTP 400."""
     return JSONResponse(status_code=400, content=_error_body(exc))
@@ -94,10 +115,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     Order matters: more-specific subclasses must be registered **before**
     the ``PrismException`` catch-all so FastAPI routes to the right handler.
     """
-    app.add_exception_handler(NotFoundError, _handle_not_found)       # type: ignore[arg-type]
-    app.add_exception_handler(ConflictError, _handle_conflict)         # type: ignore[arg-type]
-    app.add_exception_handler(ValidationError, _handle_validation)     # type: ignore[arg-type]
-    app.add_exception_handler(AuthError, _handle_auth_error)           # type: ignore[arg-type]
-    app.add_exception_handler(TokenError, _handle_token_error)         # type: ignore[arg-type]
+    app.add_exception_handler(NotFoundError, _handle_not_found)             # type: ignore[arg-type]
+    app.add_exception_handler(ConflictError, _handle_conflict)               # type: ignore[arg-type]
+    app.add_exception_handler(ValidationError, _handle_validation)           # type: ignore[arg-type]
+    app.add_exception_handler(AuthError, _handle_auth_error)                 # type: ignore[arg-type]
+    app.add_exception_handler(TokenError, _handle_token_error)               # type: ignore[arg-type]
+    # Dataset-specific — registered before the PrismException catch-all
+    app.add_exception_handler(FileTooLargeError, _handle_file_too_large)     # type: ignore[arg-type]
+    app.add_exception_handler(EmptyDatasetError, _handle_empty_dataset)      # type: ignore[arg-type]
+    app.add_exception_handler(TooManyRowsError, _handle_too_many_rows)       # type: ignore[arg-type]
+    app.add_exception_handler(RowValidationError, _handle_row_validation)    # type: ignore[arg-type]
     # Catch-all — must be last
-    app.add_exception_handler(PrismException, _handle_prism_exception) # type: ignore[arg-type]
+    app.add_exception_handler(PrismException, _handle_prism_exception)       # type: ignore[arg-type]

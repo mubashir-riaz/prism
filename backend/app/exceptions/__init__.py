@@ -46,6 +46,55 @@ class AuthError(PrismException):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Dataset-specific exceptions
+# ---------------------------------------------------------------------------
+
+
+class DatasetNotFoundError(NotFoundError):
+    """Raised when a dataset does not exist or belongs to a different org."""
+
+    pass
+
+
+class EmptyDatasetError(PrismException):
+    """Raised when an uploaded JSONL file contains zero data rows."""
+
+    pass
+
+
+class FileTooLargeError(PrismException):
+    """Raised when an uploaded file exceeds the maximum allowed byte size."""
+
+    pass
+
+
+class TooManyRowsError(PrismException):
+    """Raised when an uploaded dataset exceeds MAX_ROWS."""
+
+    pass
+
+
+class RowValidationError(PrismException):
+    """Raised when a dataset row fails DatasetRow schema validation.
+
+    Attributes
+    ----------
+    line_number : int
+        1-indexed line number of the offending row (matches editor line numbers).
+    reason : str
+        Human-readable description of the validation failure.
+    """
+
+    def __init__(self, line_number: int, reason: str) -> None:
+        self.line_number = line_number
+        self.reason = reason
+        super().__init__(
+            f"Row {line_number} failed validation: {reason}",
+            details={"line_number": line_number, "reason": reason},
+        )
+
+
 __all__ = [
     "PrismException",
     "NotFoundError",
@@ -53,4 +102,10 @@ __all__ = [
     "ValidationError",
     "TokenError",
     "AuthError",
+    # Dataset
+    "DatasetNotFoundError",
+    "EmptyDatasetError",
+    "FileTooLargeError",
+    "TooManyRowsError",
+    "RowValidationError",
 ]
