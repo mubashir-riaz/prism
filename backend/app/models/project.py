@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.api_key import APIKey
     from app.models.dataset import Dataset
     from app.models.environment import Environment
+    from app.models.eval_config import EvalConfig
     from app.models.organization import Organization
     from app.models.trace import Trace
 
@@ -72,6 +73,12 @@ class Project(TimestampedBase):
     )
     datasets: Mapped[list["Dataset"]] = relationship(
         "Dataset",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
+    eval_configs: Mapped[list["EvalConfig"]] = relationship(
+        "EvalConfig",
         back_populates="project",
         cascade="all, delete-orphan",
         lazy="raise",

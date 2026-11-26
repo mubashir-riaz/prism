@@ -7,6 +7,7 @@ from app.models.dataset import Dataset
 from app.models.dataset_version import DatasetVersion
 from app.models.enums import AuditAction, EnvironmentName, UserRole
 from app.models.environment import Environment
+from app.models.eval_config import EvalConfig
 from app.models.model_pricing import ModelPricing
 from app.models.organization import Organization
 from app.models.project import Project
@@ -29,4 +30,5 @@ __all__ = [
     "Trace",
     "Dataset",
     "DatasetVersion",
+    "EvalConfig",
 ]

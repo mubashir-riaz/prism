@@ -9,6 +9,7 @@ from app.models.base import TimestampedBase
 if TYPE_CHECKING:
     from app.models.audit_log import AuditLog
     from app.models.dataset import Dataset
+    from app.models.eval_config import EvalConfig
     from app.models.project import Project
     from app.models.user import User
 
@@ -53,6 +54,12 @@ class Organization(TimestampedBase):
     )
     datasets: Mapped[list["Dataset"]] = relationship(
         "Dataset",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+        lazy="raise",
+    )
+    eval_configs: Mapped[list["EvalConfig"]] = relationship(
+        "EvalConfig",
         back_populates="organization",
         cascade="all, delete-orphan",
         lazy="raise",
